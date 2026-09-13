@@ -1304,6 +1304,19 @@ function redactSuggestion(record: Record<string, unknown>, permissions: WorkModu
   };
 }
 
+function redactAiConversationInlineReferences(content: unknown, permissions: WorkModulePermissions): string {
+  const source = typeof content === "string" ? content : "";
+  return source.replace(/<ai_reference kind="(character|setting|chapter|context-settings)" id="[^"]+">[\s\S]*?<\/ai_reference>/gu, (reference, kind: string) => {
+    const readable = ({
+      character: permissions.characters !== "none",
+      setting: permissions.settings !== "none",
+      chapter: permissions.prose !== "none",
+      "context-settings": permissions.settings !== "none"
+    })[kind] ?? false;
+    return readable ? reference : "（已隐藏引用）";
+  });
+}
+
 function redactAiConversationMessage(item: unknown, permissions: WorkModulePermissions): unknown {
   const message = recordValue(item);
   if (!message) return item;
@@ -1316,8 +1329,9 @@ function redactAiConversationMessage(item: unknown, permissions: WorkModulePermi
     if (permissions.organizations === "none") delete readableMetadata.mentionOrganizationIds;
     if (permissions.settings === "none") delete readableMetadata.mentionSettingIds;
     if (permissions.settings === "none") delete readableMetadata.mentionContextSettingIds;
-    if (Object.keys(readableMetadata).length === Object.keys(metadata).length) return item;
-    return { ...message, metadata: readableMetadata };
+    const content = redactAiConversationInlineReferences(message.content, permissions);
+    if (Object.keys(readableMetadata).length === Object.keys(metadata).length && content === message.content) return item;
+    return { ...message, content, metadata: readableMetadata };
   }
   return {
     ...message,
