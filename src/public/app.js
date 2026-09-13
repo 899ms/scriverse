@@ -5008,11 +5008,14 @@ function aiModelSupportsImageInput() {
 function syncAiImageAttachmentControl() {
   const button = $("#ai-attachment-button");
   if (!button) return;
-  const enabled = aiModelSupportsImageInput();
-  button.classList.toggle("hidden", !enabled);
+  const model = activeAiModel();
+  const enabled = model?.multimodalEnabled === true;
   button.disabled = !enabled || aiInteractionBusy();
-  button.setAttribute("aria-hidden", String(!enabled));
-  button.title = enabled ? "添加图片附件" : "当前模型不支持图片输入";
+  button.title = enabled
+    ? "添加图片附件"
+    : model
+      ? "当前模型不支持图片输入"
+      : "选择多模态模型后可添加图片附件";
 }
 
 function renderAiImageAttachments() {
