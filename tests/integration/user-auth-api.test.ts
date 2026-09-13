@@ -3511,11 +3511,11 @@ describe("用户、作品权限与操作者追踪 API", () => {
     expect(guards.body.data[0]).toMatchObject({ issues: [], contextRefs: {}, failure: null, restricted: true });
     expect(JSON.stringify(guards.body.data)).not.toContain("TOP_SECRET_");
 
-    const acceptDenied = await collaborator.agent.post(`/api/suggestions/${suggestionId}/accept`)
+    const acceptRemoved = await collaborator.agent.post(`/api/suggestions/${suggestionId}/accept`)
       .set("X-CSRF-Token", collaborator.csrfToken)
       .send({})
-      .expect(403);
-    expect(acceptDenied.body.error.code).toBe("WORK_MODULE_WRITE_DENIED");
+      .expect(404);
+    expect(acceptRemoved.body.error.code).toBe("ROUTE_NOT_FOUND");
 
     const skillPrepareDenied = await collaborator.agent.post(`/api/ai-conversations/${conversationId}/context/prepare`)
       .set("X-CSRF-Token", collaborator.csrfToken)

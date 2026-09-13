@@ -1355,9 +1355,6 @@ export function workModuleRequirements(request: Request, write: boolean, annotat
   if (write && /^\/api\/suggestions\/[^/]+\/guard$/u.test(pathname)) {
     return { read: ["prose"], anyWrite: [...aiInteractionModules] };
   }
-  if (write && /^\/api\/suggestions\/[^/]+\/accept$/u.test(pathname)) {
-    return { write: ["prose"], anyWrite: [...aiInteractionModules] };
-  }
   if (/^\/api\/tasks\/[^/]+\/trace(?:\/calls\/[^/]+)?$/u.test(pathname)) {
     return { read: ["ai-analysis", ...contentPermissionModules] };
   }

@@ -4327,23 +4327,13 @@ export function createRuntime(options: RuntimeOptions): Runtime {
         }
         if (begun.request.status === "completed" && begun.assistantMessage) {
           const content = String(begun.assistantMessage.content ?? "");
-          const assistantMetadata = begun.assistantMessage.metadata && typeof begun.assistantMessage.metadata === "object"
-            ? begun.assistantMessage.metadata as Record<string, unknown>
-            : {};
-          const writingSuggestionId = typeof assistantMetadata.writingSuggestionId === "string"
-            ? assistantMetadata.writingSuggestionId
-            : "";
-          const writingSuggestion = writingSuggestionId
-            ? redactSuggestion(ai.getSuggestion(writingSuggestionId), permissions)
-            : null;
           if (content) sendEvent("delta", { delta: content, replayed: true });
           sendEvent("complete", {
             replayed: true,
             conversationId,
             conversationTitle: store.getAiConversationSummary(conversationId).title,
             messageId: begun.assistantMessage.id,
-            messageCreatedAt: begun.assistantMessage.createdAt,
-            ...(writingSuggestion ? { writingSuggestion } : {})
+            messageCreatedAt: begun.assistantMessage.createdAt
           });
         } else {
           sendEvent("request_status", {
@@ -4373,7 +4363,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
           questionId: pendingQuestion.id
         });
       }
-      const suggestion = await ai.createStreamingChat({
+      const result = await ai.createStreamingChat({
         workId: request.params.workId,
         instruction: resolvedInstruction,
         skillInstruction: instructionText,
@@ -4391,33 +4381,30 @@ export function createRuntime(options: RuntimeOptions): Runtime {
         ...(input.parameters ? { parameters: input.parameters } : {}),
         ...(preparedChatImageAttachments.length ? { imageAttachments: preparedChatImageAttachments } : {})
       }, (delta) => sendEvent("delta", { delta }));
-      const assistantMessageId = typeof suggestion.conversationMessage === "object" && suggestion.conversationMessage !== null
-        ? String((suggestion.conversationMessage as Record<string, unknown>).id ?? "")
+      const assistantMessageId = typeof result.conversationMessage === "object" && result.conversationMessage !== null
+        ? String((result.conversationMessage as Record<string, unknown>).id ?? "")
         : "";
       if (!stopping) {
         store.finishAiConversationStreamRequest(streamRequestId, "completed", "completed", assistantMessageId || undefined);
       }
       streamRequestFinished = true;
       sendEvent("complete", {
-        suggestionId: suggestion.id,
-        callId: suggestion.callId,
-        provider: suggestion.provider,
-        model: suggestion.model,
-        outputTokens: suggestion.outputTokens,
-        cacheHitPercent: suggestion.cacheHitPercent,
-        processDurationMs: suggestion.processDurationMs,
-        chapterVersion: suggestion.chapterVersion,
-        toolCalls: suggestion.toolCalls,
-        processSteps: suggestion.processSteps,
-        contextUsage: suggestion.contextUsage,
+        callId: result.callId,
+        provider: result.provider,
+        model: result.model,
+        outputTokens: result.outputTokens,
+        cacheHitPercent: result.cacheHitPercent,
+        processDurationMs: result.processDurationMs,
+        toolCalls: result.toolCalls,
+        processSteps: result.processSteps,
+        contextUsage: result.contextUsage,
         conversationId,
-        conversationTitle: suggestion.conversationTitle,
-        ...(suggestion.action !== "note" ? { writingSuggestion: redactSuggestion(suggestion, permissions) } : {}),
-        messageId: typeof suggestion.conversationMessage === "object" && suggestion.conversationMessage !== null
-          ? (suggestion.conversationMessage as Record<string, unknown>).id
+        conversationTitle: result.conversationTitle,
+        messageId: typeof result.conversationMessage === "object" && result.conversationMessage !== null
+          ? (result.conversationMessage as Record<string, unknown>).id
           : undefined,
-        messageCreatedAt: typeof suggestion.conversationMessage === "object" && suggestion.conversationMessage !== null
-          ? (suggestion.conversationMessage as Record<string, unknown>).createdAt
+        messageCreatedAt: typeof result.conversationMessage === "object" && result.conversationMessage !== null
+          ? (result.conversationMessage as Record<string, unknown>).createdAt
           : undefined
       });
     } catch (error) {
@@ -4467,15 +4454,6 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     const suggestion = ai.getSuggestion(request.params.suggestionId);
     const permissions = requestPermissions(request, String(suggestion.workId));
     data(response, redactContinuationGuard(await ai.runSuggestionGuard(request.params.suggestionId, input.content), permissions), 201);
-  });
-  app.post("/api/suggestions/:suggestionId/accept", (request, response) => {
-    const input = parse(z.object({ content: z.string().max(2_000_000).optional() }), request.body ?? {});
-    const suggestion = ai.getSuggestion(request.params.suggestionId);
-    const permissions = requestPermissions(request, String(suggestion.workId));
-    if (!canWriteWorkModule(permissions, "prose")) {
-      throw new AppError(403, "WORK_MODULE_WRITE_DENIED", "你没有将 AI 建议写入正文的权限");
-    }
-    data(response, ai.acceptSuggestion(request.params.suggestionId, input.content));
   });
   app.post("/api/suggestions/:suggestionId/reject", (request, response) => {
     const suggestion = ai.rejectSuggestion(request.params.suggestionId);

@@ -19,7 +19,8 @@ describe("AI 模型选择收纳界面", () => {
     expect(page).toContain('<label id="ai-model-popover-title" for="ai-model">实际使用模型</label>');
     expect(page).toContain('<select id="ai-model" class="ai-model-native-select" aria-label="实际使用模型">');
     expect(page).toContain('id="ai-model-options" class="ai-model-options" role="listbox"');
-    expect(page).toContain('id="ai-attachment-button" class="ai-attachment-button hidden"');
+    expect(page).toContain('id="ai-attachment-button" class="ai-attachment-button"');
+    expect(page).toContain('title="选择多模态模型后可添加图片附件" disabled');
     expect(page).toContain('id="ai-attachment-input" class="ai-attachment-input" type="file"');
     expect(page).toContain("feature=ai-model-picker-v1");
     expect(page).toContain("feature=ai-fork-model-unlock-v1");
