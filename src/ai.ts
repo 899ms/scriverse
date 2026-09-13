@@ -6430,33 +6430,6 @@ export class AiManager {
         ...(conversationMessage ? { conversationMessage } : {})
       };
     }
-    const chapter = effectiveInput.scope.chapterId ? this.store.getChapter(effectiveInput.scope.chapterId) : null;
-    const suggestionId = id("suggestion");
-    const suggestionTaskType = generated.toolCallLimit ? "chat" : activeWritingSkillName === "continue-writing"
-      ? "continue"
-      : activeWritingSkillName === "polish-writing" ? "polish" : "chat";
-    const suggestionAction = generated.toolCallLimit ? "note" : activeWritingSkillName === "continue-writing"
-      ? "append"
-      : activeWritingSkillName === "polish-writing" ? "replace-selection" : "note";
-    this.store.db.run(
-      `INSERT INTO ai_suggestions (id, call_id, work_id, chapter_id, chapter_version, task_type, instruction,
-       source_text, content, action, status, created_at, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-      suggestionId,
-      generated.callId,
-      input.workId,
-      chapter ? String(chapter.id) : null,
-      chapter ? Number(chapter.versionNo) : null,
-      suggestionTaskType,
-      input.instruction,
-      effectiveInput.scope.selection ?? "",
-      generated.content,
-      suggestionAction,
-      now(),
-      currentRequestActor()?.userId ?? null
-    );
-    if (suggestionTaskType === "continue") {
-      await this.runSuggestionGuardWithRuntime(suggestionId, undefined, effectiveInput.runtime);
-    }
     const conversationMessage = input.conversationId && input.assistantMessageRequestId
       ? this.store.upsertAiConversationAssistantMessage(
         input.conversationId,
@@ -6464,10 +6437,7 @@ export class AiManager {
         generated.content,
         {
           ...generatedMessageMetadata,
-          ...(activeWritingSkillName && !generated.toolCallLimit ? {
-            activeSkills: [activeWritingSkillName],
-            writingSuggestionId: suggestionId
-          } : {}),
+          ...(activeWritingSkillName && !generated.toolCallLimit ? { activeSkills: [activeWritingSkillName] } : {}),
           ...(input.toolContinuation
             ? { anthropicContent: generated.anthropicContent ?? [] }
             : generated.anthropicContent?.length ? { anthropicContent: generated.anthropicContent } : {})
@@ -6513,7 +6483,10 @@ export class AiManager {
       });
     }
     return {
-      ...this.getSuggestion(suggestionId),
+      callId: generated.callId,
+      content: generated.content,
+      provider: generated.provider,
+      model: generated.model,
       outputTokens: generated.outputTokens,
       processDurationMs,
       ...(generated.cacheHitPercent === undefined ? {} : { cacheHitPercent: generated.cacheHitPercent }),
@@ -6805,72 +6778,6 @@ export class AiManager {
     const row = this.store.db.get("SELECT * FROM ai_suggestions WHERE id = ?", suggestionId);
     if (!row) throw notFound("AI 建议");
     return this.mapSuggestion(row);
-  }
-
-  acceptSuggestion(suggestionId: string, acceptedContent?: string): Record<string, unknown> {
-    const suggestion = this.getSuggestion(suggestionId);
-    if (suggestion.status !== "pending") throw new AppError(409, "SUGGESTION_DECIDED", "该建议已经处理");
-    if (!suggestion.chapterId || suggestion.action === "note") {
-      throw new AppError(409, "SUGGESTION_NOT_APPLICABLE", "问答或分析类建议不能直接写入正文");
-    }
-    const chapter = this.store.getChapter(String(suggestion.chapterId));
-    if (chapter.versionNo !== suggestion.chapterVersion) {
-      throw new AppError(409, "STALE_SUGGESTION", "正文版本已变化，请重新生成建议", {
-        expectedVersion: suggestion.chapterVersion,
-        currentVersion: chapter.versionNo
-      });
-    }
-    const content = acceptedContent ?? String(suggestion.content);
-    if (suggestion.taskType === "continue") {
-      const guard = this.store.getLatestContinuationGuard(suggestionId);
-      if (!guard) throw new AppError(409, "GUARD_REQUIRED", "续写建议尚未完成一致性检查");
-      if (guard.status === "failed") {
-        throw new AppError(409, "GUARD_FAILED", "续写一致性检查失败，请重新运行检查后再采纳");
-      }
-      if (guard.chapterVersion !== chapter.versionNo || guard.contentHash !== this.store.hashContent(content)) {
-        throw new AppError(409, "GUARD_STALE", "续写内容或正文版本已变化，请重新运行一致性检查");
-      }
-      const call = this.store.db.get("SELECT context_scope_json FROM ai_calls WHERE id = ?", String(suggestion.callId));
-      if (!call) throw notFound("AI 调用记录");
-      const originalScope = json<ContextScope>(stringValue(call, "context_scope_json"), {
-        type: "chapter",
-        chapterId: String(suggestion.chapterId)
-      });
-      const currentScope = this.enrichContinuationScope(String(suggestion.workId), originalScope, String(suggestion.instruction));
-      const currentContextRefs = this.buildContinuationContextRefs(String(suggestion.workId), String(suggestion.chapterId), currentScope);
-      if (JSON.stringify(guard.contextRefs) !== JSON.stringify(currentContextRefs)) {
-        throw new AppError(409, "GUARD_STALE", "人物状态、锁定设定、大纲、伏笔或时间线已变化，请重新运行一致性检查");
-      }
-    }
-    let nextContent: string;
-    if (suggestion.action === "append") {
-      nextContent = `${String(chapter.content).trimEnd()}\n\n${content.trim()}`.trim();
-    } else {
-      const sourceText = String(suggestion.sourceText);
-      if (!sourceText || !String(chapter.content).includes(sourceText)) {
-        throw new AppError(409, "SOURCE_TEXT_CHANGED", "原选中文本已不存在，请重新生成建议");
-      }
-      const call = this.store.db.get("SELECT context_scope_json FROM ai_calls WHERE id = ?", String(suggestion.callId));
-      const originalScope = call
-        ? json<ContextScope>(stringValue(call, "context_scope_json"), { type: "chapter", chapterId: String(chapter.id) })
-        : null;
-      const selectionStart = originalScope?.selectionStart;
-      const selectionEnd = originalScope?.selectionEnd;
-      if (Number.isInteger(selectionStart) && Number.isInteger(selectionEnd)) {
-        const chapterContent = String(chapter.content);
-        if (selectionStart! < 0 || selectionEnd! <= selectionStart! || selectionEnd! > chapterContent.length
-          || chapterContent.slice(selectionStart, selectionEnd) !== sourceText) {
-          throw new AppError(409, "SELECTION_TARGET_CHANGED", "润色选区内容已变化，请重新选择文本");
-        }
-        nextContent = `${chapterContent.slice(0, selectionStart)}${content}${chapterContent.slice(selectionEnd)}`;
-      } else {
-        nextContent = String(chapter.content).replace(sourceText, content);
-      }
-    }
-    const updated = this.store.saveChapter(String(chapter.id), { content: nextContent }, "ai-suggestion", suggestionId);
-    this.store.db.run("UPDATE ai_suggestions SET status = 'accepted', content = ?, decided_at = ?, decided_by_user_id = ? WHERE id = ?", content, now(), currentRequestActor()?.userId ?? null, suggestionId);
-    this.store.audit(String(suggestion.workId), "suggestion.accepted", "ai-suggestion", suggestionId, { chapterId: chapter.id });
-    return { suggestion: this.getSuggestion(suggestionId), chapter: updated };
   }
 
   rejectSuggestion(suggestionId: string): Record<string, unknown> {

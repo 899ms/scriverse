@@ -384,8 +384,11 @@ describe("Anthropic Messages 供应商", () => {
     expect(response.text).toContain('event: delta\ndata: {"delta":" 流式响应"}');
     expect(response.text).toContain('"type":"thinking","round":1,"content":"先检查上下文。"');
     expect(response.text).toContain('"outputTokens":6,"cacheHitPercent":33.3');
+    const complete = JSON.parse(response.text.match(/event: complete\ndata: ([^\n]+)/u)?.[1] ?? "{}") as { conversationId?: string };
+    const conversation = await request(runtime.app).get(`/api/ai-conversations/${complete.conversationId}`).expect(200);
     const suggestions = await request(runtime.app).get(`/api/works/${workId}/suggestions`).expect(200);
-    expect(suggestions.body.data[0].content).toBe("LongCat 流式响应");
+    expect(conversation.body.data.messages.at(-1).content).toBe("LongCat 流式响应");
+    expect(suggestions.body.data).toEqual([]);
     const usage = await request(runtime.app).get(`/api/works/${workId}/ai-settings/usage`).expect(200);
     expect(usage.body.data.summary).toMatchObject({
       totalTokens: 36,
@@ -462,7 +465,10 @@ describe("Anthropic Messages 供应商", () => {
     expect(response.text).toContain('event: delta\ndata: {"delta":"已读取"}');
     expect(response.text).toContain('event: delta\ndata: {"delta":"目录。"}');
     expect(response.text.indexOf("event: tool_call")).toBeLessThan(response.text.indexOf('"delta":"已读取"'));
+    const complete = JSON.parse(response.text.match(/event: complete\ndata: ([^\n]+)/u)?.[1] ?? "{}") as { conversationId?: string };
+    const conversation = await request(runtime.app).get(`/api/ai-conversations/${complete.conversationId}`).expect(200);
     const suggestions = await request(runtime.app).get(`/api/works/${workId}/suggestions`).expect(200);
-    expect(suggestions.body.data[0].content).toBe("已读取目录。");
+    expect(conversation.body.data.messages.at(-1).content).toBe("已读取目录。");
+    expect(suggestions.body.data).toEqual([]);
   });
 });
