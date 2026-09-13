@@ -1496,7 +1496,7 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
 
 .hidden { display: none !important; }
 .editor-view { container-name: editor-workspace; container-type: inline-size; display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; }
-.editor-toolbar { position: relative; display: grid; grid-row: 1; grid-template-areas: "title actions" "path actions"; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; row-gap: 2px; padding: 6px 7%; border-bottom: 1px solid var(--line); }
+.editor-toolbar { position: relative; display: grid; grid-row: 1; grid-template-areas: "title actions" "path actions"; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; row-gap: 2px; padding: 6px 18px; border-bottom: 1px solid var(--line); }
 #chapter-path { grid-area: path; min-width: 0; margin: 0; color: var(--muted); font-size: 10px; line-height: 14px; letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chapter-title { grid-area: title; display: block; width: 100%; min-width: 0; height: 26px; border: 0; border-radius: 0; background: transparent; font-size: 20px; font-weight: 600; line-height: 26px; padding: 0; text-overflow: ellipsis; }
 .chapter-title:focus { box-shadow: inset 0 -1px var(--accent); }
@@ -1532,7 +1532,7 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
 .chapter-foreshadow-reminder-details dt { color: var(--reminder-color); font-size: 9px; font-weight: 700; }
 .chapter-foreshadow-reminder-details dd { margin: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; line-height: 1.5; white-space: pre-wrap; }
 @container editor-workspace (max-width: 720px) {
-  .editor-toolbar { grid-template-areas: "title" "path" "actions"; grid-template-columns: minmax(0, 1fr); padding-inline: 6%; }
+  .editor-toolbar { grid-template-areas: "title" "path" "actions"; grid-template-columns: minmax(0, 1fr); }
   .editor-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 4px; padding-left: 0; border-left: 0; }
   .chapter-stats { display: none; }
   .chapter-foreshadow-reminder { grid-template-areas: "summary" "actions" "details"; grid-template-columns: minmax(0, 1fr); padding-inline: 6%; }

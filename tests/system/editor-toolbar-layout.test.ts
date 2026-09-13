@@ -171,7 +171,7 @@ describe("编辑器工具栏布局", () => {
     expect(styles.text).toContain('.editor-toolbar { grid-template-areas: "title" "path" "actions";');
     expect(styles.text).toContain('.editor-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 4px; padding-left: 0; border-left: 0; }');
     expect(styles.text).not.toContain('.editor-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }');
-    expect(page.text).toMatch(/styles\.css\?[^"\n]*feature=chapter-header-compact-v3/u);
+    expect(page.text).toMatch(/styles\.css\?[^"\n]*feature=chapter-header-compact-v4/u);
     expect(styles.text).toContain('.chapter-title { font-size: 18px; }');
     expect(styles.text).toContain('.editor-view .editor-actions > button { min-width: 0; min-height: 34px; padding-inline: 6px; font-size: 11px; }');
     expect(styles.text).toContain('.vditor-editor-host .vditor-toolbar { display: flex; align-items: center; flex: 0 0 auto; }');
