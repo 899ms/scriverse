@@ -3321,6 +3321,7 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
 .user-message .message-body:empty { display: none; }
 .user-message-mentions-label { flex: 0 0 auto; opacity: .72; letter-spacing: .08em; }
 .user-message-mention { min-width: 0; max-width: 100%; padding: 2px 6px; overflow-wrap: anywhere; border: 1px solid color-mix(in srgb, currentColor 55%, transparent); border-radius: 999px; background: color-mix(in srgb, currentColor 12%, transparent); }
+.user-message-inline-mention { display: inline-flex; align-items: center; margin: 0 2px; vertical-align: baseline; font-size: .82em; line-height: 1.35; }
 
 /* Toast 使用 Popover Top Layer；必须覆盖 UA 默认居中/系统边框/Canvas 背景 */
 .toast-region,

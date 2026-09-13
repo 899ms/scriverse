@@ -3918,10 +3918,13 @@ describe("AI 供应商、模型与建议 API", () => {
     const { providerId, modelId } = await configureAi();
     await request(runtime.app).post(`/api/providers/${providerId}/test`).send({}).expect(200);
     await request(runtime.app).patch(`/api/works/${workId}/ai-settings`).send({ agentTools: [] }).expect(200);
-    fetchMock.mockImplementation(async (input) => {
+    const sentPrompts: Array<Array<{ content?: string }>> = [];
+    fetchMock.mockImplementation(async (input, init) => {
       if (String(input).endsWith("/models")) {
         return new Response(JSON.stringify({ data: [{ id: "mock-novel-model" }] }), { status: 200 });
       }
+      const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
+      sentPrompts.push(body.messages ?? []);
       return new Response('data: {"choices":[{"delta":{"content":"已读取全部主动引用。"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {
         status: 200,
         headers: { "Content-Type": "text/event-stream" }
@@ -3930,8 +3933,18 @@ describe("AI 供应商、模型与建议 API", () => {
 
     const conversation = await request(runtime.app).post(`/api/works/${workId}/ai-conversations`).send({}).expect(201);
     const conversationId = String(conversation.body.data.id);
+    const inlineInstruction = [
+      "请检查",
+      `<ai_reference kind="character" id="${character.body.data.id}">闻笙</ai_reference>`,
+      "与",
+      `<ai_reference kind="setting" id="${setting.body.data.id}">月港通行想法</ai_reference>`,
+      "，再核对",
+      `<ai_reference kind="chapter" id="${chapterId}">第一卷 / 第一章</ai_reference>`,
+      "和",
+      '<ai_reference kind="context-settings" id="include-setting-info">注入上下文设定</ai_reference>。'
+    ].join("");
     const streamed = await request(runtime.app).post(`/api/works/${workId}/chat/stream`).send({
-      instruction: "请检查这些主动引用。",
+      instruction: inlineInstruction,
       scope: {
         type: "none",
         characterIds: [character.body.data.id],
@@ -3943,7 +3956,7 @@ describe("AI 供应商、模型与建议 API", () => {
       conversationId
     }).expect(200).expect("Content-Type", /text\/event-stream/u);
     const userMessagePayload = JSON.parse(streamed.text.match(/event: user_message\ndata: ([^\n]+)/u)?.[1] ?? "{}") as {
-      message?: { metadata?: Record<string, unknown> };
+      message?: { content?: string; metadata?: Record<string, unknown> };
     };
     expect(userMessagePayload.message?.metadata).toMatchObject({
       mentionCharacterIds: [character.body.data.id],
@@ -3951,8 +3964,15 @@ describe("AI 供应商、模型与建议 API", () => {
       mentionChapterIds: [chapterId],
       mentionContextSettingIds: ["include-setting-info"]
     });
+    expect(userMessagePayload.message?.content).toBe(inlineInstruction);
+    const sentPrompt = sentPrompts.at(0)?.find((message) => message.content?.startsWith("<author_instruction>"))?.content ?? "";
+    expect(sentPrompt).toBe(`<author_instruction>\n${inlineInstruction}\n</author_instruction>`);
+    expect(sentPrompt.indexOf("请检查")).toBeLessThan(sentPrompt.indexOf('<ai_reference kind="character"'));
+    expect(sentPrompt.indexOf('<ai_reference kind="character"')).toBeLessThan(sentPrompt.indexOf("与"));
+    expect(sentPrompt.indexOf("与")).toBeLessThan(sentPrompt.indexOf('<ai_reference kind="setting"'));
 
     const reloaded = await request(runtime.app).get(`/api/ai-conversations/${conversationId}`).expect(200);
+    expect(reloaded.body.data.messages[0].content).toBe(inlineInstruction);
     expect(reloaded.body.data.messages[0].metadata).toMatchObject({
       mentionCharacterIds: [character.body.data.id],
       mentionSettingIds: [setting.body.data.id],

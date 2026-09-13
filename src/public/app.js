@@ -5,7 +5,7 @@ import { renderMarkdown } from "/markdown.js?v=20260912-stream-render-v2";
 import { createStreamingMarkdownRenderer } from "/stream-markdown.js?v=20260912-stream-render-v2";
 import { createAiRenderScheduler } from "/ai-render-scheduler.js?v=20260912-stream-render-v2";
 import { createImWorkspace } from "/im.js?v=20260904-im-judge-outcomes-v106";
-import { findAiMention, listAiMentionOptions, mergeAiReferenceScope, userMessageMentionNames } from "/ai-mentions.js?v=20260811-user-message-mentions-v1";
+import { findAiMention, listAiMentionOptions, mergeAiReferenceScope } from "/ai-mentions.js?v=20260811-user-message-mentions-v1";
 import { applyAiSkillCommand, findAiSkillCommand, listAiSkillOptions } from "/ai-skill-menu.js?v=20260830-ai-skill-slash-menu-v1";
 import {
   emptyRoleplayScenePin,
@@ -2326,6 +2326,148 @@ function aiReferenceKindLabel(reference) {
   return ({ character: "角色", setting: "设定", chapter: "章节", "context-settings": "能力" })[reference.kind] ?? "引用";
 }
 
+function escapeAiReferenceXmlText(value) {
+  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;");
+}
+
+function escapeAiReferenceXmlAttribute(value) {
+  return escapeAiReferenceXmlText(value).replaceAll('"', "&quot;");
+}
+
+function unescapeAiReferenceXmlText(value) {
+  return String(value ?? "").replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&amp;", "&");
+}
+
+function serializeAiReference(reference) {
+  return `<ai_reference kind="${escapeAiReferenceXmlAttribute(reference.kind)}" id="${escapeAiReferenceXmlAttribute(reference.id)}">${escapeAiReferenceXmlText(reference.name)}</ai_reference>`;
+}
+
+function parseAiReferenceMarkup(value) {
+  const references = [];
+  const pattern = /<ai_reference kind="(character|setting|chapter|context-settings)" id="([^"]+)">([\s\S]*?)<\/ai_reference>/gu;
+  let text = "";
+  let cursor = 0;
+  for (const match of String(value ?? "").matchAll(pattern)) {
+    const index = match.index ?? 0;
+    const reference = {
+      kind: match[1],
+      id: unescapeAiReferenceXmlText(match[2]),
+      name: unescapeAiReferenceXmlText(match[3])
+    };
+    const marker = `\uE000ai-reference-${references.length}\uE001`;
+    text += `${String(value).slice(cursor, index)}${marker}`;
+    references.push({ ...reference, marker });
+    cursor = index + match[0].length;
+  }
+  return { text: `${text}${String(value ?? "").slice(cursor)}`, references };
+}
+
+function aiReferenceByKey(kind, referenceId) {
+  return state.aiReferences.find((reference) => reference.kind === kind && String(reference.id) === String(referenceId)) ?? null;
+}
+
+function aiPromptMarkupFromNode(node, root = node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (!(node instanceof Element)) return "";
+  if (node.matches("[data-ai-reference-key]")) {
+    const [kind, ...idParts] = String(node.dataset.aiReferenceKey ?? "").split(":");
+    const reference = aiReferenceByKey(kind, idParts.join(":"));
+    return reference ? serializeAiReference(reference) : "";
+  }
+  if (node.tagName === "BR") return "\n";
+  const text = [...node.childNodes].map((child) => aiPromptMarkupFromNode(child, root)).join("");
+  return node !== root && ["DIV", "P"].includes(node.tagName) ? `${text}\n` : text;
+}
+
+function aiPromptMarkup() {
+  return aiPromptMarkupFromNode($("#ai-prompt")).replace(/\n$/u, "");
+}
+
+function setAiPromptMarkup(value) {
+  const prompt = $("#ai-prompt");
+  const { text, references } = parseAiReferenceMarkup(value);
+  prompt.replaceChildren();
+  let cursor = 0;
+  for (const reference of references) {
+    const markerIndex = text.indexOf(reference.marker, cursor);
+    if (markerIndex < 0) continue;
+    if (markerIndex > cursor) prompt.append(document.createTextNode(text.slice(cursor, markerIndex)));
+    const currentReference = aiReferenceByKey(reference.kind, reference.id);
+    if (currentReference) prompt.append(createAiReferenceChip(currentReference));
+    else prompt.append(document.createTextNode(reference.name));
+    cursor = markerIndex + reference.marker.length;
+  }
+  if (cursor < text.length) prompt.append(document.createTextNode(text.slice(cursor)));
+  renderAiReferences();
+}
+
+function aiMessageReferenceReadable(reference) {
+  const module = ({
+    character: "characters",
+    setting: "settings",
+    chapter: "prose",
+    "context-settings": "settings"
+  })[reference.kind];
+  return !module || canReadModule(module);
+}
+
+function createInlineUserMessageReference(reference) {
+  const bubble = document.createElement("span");
+  const kind = aiReferenceKindLabel(reference);
+  const name = aiMessageReferenceReadable(reference) && reference.name.trim()
+    ? reference.name.trim()
+    : "已隐藏引用";
+  bubble.className = "user-message-mention user-message-inline-mention";
+  bubble.textContent = `${kind} · ${name}`;
+  bubble.title = `${kind}：${name}`;
+  bubble.setAttribute("aria-label", `${kind}：${name}`);
+  return bubble;
+}
+
+function replaceAiReferenceMarkers(host, references) {
+  if (!host || references.length === 0) return;
+  const markers = new Map(references.map((reference) => [reference.marker, reference]));
+  const textNodes = [];
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  for (const textNode of textNodes) {
+    const value = textNode.textContent ?? "";
+    const matches = [...markers.keys()].filter((marker) => value.includes(marker));
+    if (matches.length === 0) continue;
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    while (cursor < value.length) {
+      const match = [...markers.keys()]
+        .map((marker) => ({ marker, index: value.indexOf(marker, cursor) }))
+        .filter((item) => item.index >= 0)
+        .sort((left, right) => left.index - right.index)[0];
+      if (!match) {
+        fragment.append(document.createTextNode(value.slice(cursor)));
+        break;
+      }
+      if (match.index > cursor) fragment.append(document.createTextNode(value.slice(cursor, match.index)));
+      fragment.append(createInlineUserMessageReference(markers.get(match.marker)));
+      cursor = match.index + match.marker.length;
+    }
+    textNode.replaceWith(fragment);
+  }
+}
+
+function userMessageMentionEntries(ids, items) {
+  if (!Array.isArray(ids) || !Array.isArray(items)) return [];
+  const names = new Map(items.map((item) => [String(item?.id ?? ""), String(item?.name ?? "").trim()]));
+  const seen = new Set();
+  const entries = [];
+  for (const id of ids) {
+    const value = String(id ?? "");
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    const name = names.get(value);
+    if (name) entries.push({ id: value, name });
+  }
+  return entries;
+}
+
 function createAiReferenceChip(reference) {
   const chip = document.createElement("span");
   chip.className = "ai-prompt-reference";
@@ -2399,7 +2541,7 @@ function createAiChatTabState(input = {}) {
     roleplayUserCharacter: input.roleplayUserCharacter ?? null,
     citations: input.citations ?? [],
     references: input.references ?? [],
-    composer: input.composer ?? { text: "", citations: [], references: [], images: [], semanticSnapshot: null, sceneDirection: "", scenePin: emptyRoleplayScenePin() },
+    composer: input.composer ?? { text: "", markup: "", citations: [], references: [], images: [], semanticSnapshot: null, sceneDirection: "", scenePin: emptyRoleplayScenePin() },
     contextUsage: input.contextUsage ?? null,
     contextWarning: input.contextWarning === true,
     lastMessageAt: input.lastMessageAt ?? null,
@@ -2439,6 +2581,7 @@ function setAiChatTabComposerSnapshot(tab, snapshot) {
   tab.references = snapshot.references.map((reference) => ({ ...reference }));
   tab.composer = {
     text: snapshot.text,
+    markup: snapshot.markup,
     citations: tab.citations.map((citation) => ({ ...citation })),
     references: tab.references.map((reference) => ({ ...reference })),
     images: normalizeAiChatImageAttachments(snapshot.images),
@@ -2451,6 +2594,7 @@ function setAiChatTabComposerSnapshot(tab, snapshot) {
 function clearAiChatTabComposer(tab) {
   setAiChatTabComposerSnapshot(tab, {
     text: "",
+    markup: "",
     citations: [],
     references: [],
     images: [],
@@ -2477,7 +2621,7 @@ function applyAiChatTabState(tab) {
   const selectedModelId = tab.modelId ?? tab.selectedModelId;
   if (selectedModelId && state.models.some((model) => model.id === selectedModelId)) $("#ai-model").value = selectedModelId;
   syncAiModelPicker();
-  setAiPromptText(tab.composer.text);
+  setAiPromptMarkup(tab.composer.markup ?? tab.composer.text);
   restoreAiSceneComposer(tab.composer);
   renderAiCitations();
   renderAiSemanticInjection();
@@ -5136,6 +5280,7 @@ function clearAiPromptComposer({ collapseScenePanel = false } = {}) {
 function captureAiPromptComposer() {
   return {
     text: aiPromptText(),
+    markup: aiPromptMarkup(),
     citations: state.aiCitations.map((citation) => ({ ...citation })),
     references: state.aiReferences.map((reference) => ({ ...reference })),
     images: normalizeAiChatImageAttachments(state.aiImageAttachments),
@@ -5150,7 +5295,7 @@ function restoreAiPromptComposer(snapshot) {
   state.aiReferences = snapshot.references.map((reference) => ({ ...reference }));
   state.aiImageAttachments = normalizeAiChatImageAttachments(snapshot.images);
   state.aiSemanticSnapshot = snapshot.semanticSnapshot ? structuredClone(snapshot.semanticSnapshot) : null;
-  setAiPromptText(snapshot.text);
+  setAiPromptMarkup(snapshot.markup ?? snapshot.text);
   restoreAiSceneComposer(snapshot);
   renderAiCitations();
   renderAiImageAttachments();
@@ -18269,6 +18414,7 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
   const requestComposerSnapshot = retry
     ? {
       text: retry.prompt,
+      markup: retry.prompt,
       citations: retry.citations ?? [],
       references: [],
       images: retry.images ?? [],
@@ -18276,14 +18422,15 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
       scenePin: captureAiScenePin()
     }
     : composerSnapshot;
-  const instruction = requestComposerSnapshot.text.trim();
+  const instruction = String(requestComposerSnapshot.markup ?? requestComposerSnapshot.text).trim();
+  const instructionText = String(requestComposerSnapshot.text ?? "").trim();
   const sceneDirection = $("#ai-task").value === "roleplay"
     ? String(requestComposerSnapshot.sceneDirection ?? "").trim()
     : "";
   const scenePin = $("#ai-task").value === "roleplay"
     ? normalizeRoleplayScenePin(requestComposerSnapshot.scenePin)
     : emptyRoleplayScenePin();
-  if (!instruction && !sceneDirection) {
+  if (!instructionText && !sceneDirection) {
     return toast($("#ai-task").value === "roleplay" ? "请输入台词或场景旁白" : "请输入指令", "error");
   }
   if ($("#ai-task").value === "roleplay" && !state.aiRoleplayCharacter) return toast("请先选择角色卡", "error");
@@ -18856,10 +19003,14 @@ function appendMessage(role, text, citations = [], createdAt = null, metadata = 
   if (errorCode) message.dataset.errorCode = errorCode;
   if (isFailure && typeof metadata?.pendingQuestionId === "string") message.dataset.pendingQuestionId = metadata.pendingQuestionId;
   const parsedUserTurn = role === "user" ? parseRoleplayUserTurn(text) : null;
+  const userMessageContent = parsedUserTurn?.hasMarkup ? parsedUserTurn.userMessage : text;
+  const inlineReferences = role === "user" ? parseAiReferenceMarkup(userMessageContent).references : [];
+  const renderedUserMessage = role === "user" ? parseAiReferenceMarkup(userMessageContent).text : userMessageContent;
   const messageBody = isFailure
     ? `<p class="ai-error-text">${esc(text)}</p>${aiToolCallSettingsLinkMarkup(text)}`
-    : renderMarkdown(parsedUserTurn?.hasMarkup ? parsedUserTurn.userMessage : text);
+    : renderMarkdown(renderedUserMessage);
   message.innerHTML = `<div class="message-body">${messageBody}</div>`;
+  if (role === "user") replaceAiReferenceMarkers(message.querySelector(".message-body"), inlineReferences);
   message.querySelector("[data-ai-tool-call-settings-link]")?.addEventListener("click", (event) => {
     event.preventDefault();
     openAiToolCallSettings().catch((error) => toast(`打开 AI 设置失败：${error.message}`, "error"));
@@ -18898,16 +19049,19 @@ function appendMessage(role, text, citations = [], createdAt = null, metadata = 
   }))) ?? [];
   const settingReferences = state.settings.map((setting) => ({ id: setting.id, name: setting.title }));
   const contextSettingReferences = [{ id: "include-setting-info", name: "注入上下文设定" }];
+  const inlineReferenceKeys = new Set(inlineReferences.map((reference) => aiReferenceKey(reference)));
   const mentionGroups = role === "user"
     ? [
-      ["角色", metadata?.mentionCharacterIds, state.characters],
-      ["种族", metadata?.mentionRaceIds, state.races],
-      ["组织", metadata?.mentionOrganizationIds, state.organizations],
-      ["设定", metadata?.mentionSettingIds, settingReferences],
-      ["章节", metadata?.mentionChapterIds, chapterReferences],
-      ["能力", metadata?.mentionContextSettingIds, contextSettingReferences]
+      ["character", "角色", metadata?.mentionCharacterIds, state.characters],
+      ["race", "种族", metadata?.mentionRaceIds, state.races],
+      ["organization", "组织", metadata?.mentionOrganizationIds, state.organizations],
+      ["setting", "设定", metadata?.mentionSettingIds, settingReferences],
+      ["chapter", "章节", metadata?.mentionChapterIds, chapterReferences],
+      ["context-settings", "能力", metadata?.mentionContextSettingIds, contextSettingReferences]
     ]
-      .flatMap(([kind, ids, items]) => userMessageMentionNames(ids, items).map((name) => ({ kind, name })))
+      .flatMap(([referenceKind, kind, ids, items]) => userMessageMentionEntries(ids, items)
+        .filter((reference) => !inlineReferenceKeys.has(`${referenceKind}:${reference.id}`))
+        .map((reference) => ({ kind, name: reference.name })))
     : [];
   if (mentionGroups.length) {
     const references = document.createElement("div");
