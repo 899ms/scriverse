@@ -337,8 +337,8 @@ describe("作者完整创作流程", () => {
     const icon = await request(runtime.app).get("/icon.svg").expect(200).expect("Content-Type", /svg/u);
     const manifest = await request(runtime.app).get("/site.webmanifest").expect(200);
     expect(page.text).toContain('id="shelf-view"');
-    expect(page.text).toMatch(/<link[^>]+href="\/styles\.css\?[^"]*feature=continuation-guard-failure-details-v1[^"]*"/u);
-    expect(page.text).toMatch(/<script[^>]+src="\/app\.js\?[^"]*feature=continuation-guard-failure-details-v1[^"]*"/u);
+    expect(page.text).toMatch(/<link[^>]+href="\/styles\.css\?[^"]*feature=ai-prose-acceptance-removed-v1[^"]*"/u);
+    expect(page.text).toMatch(/<script[^>]+src="\/app\.js\?[^"]*feature=ai-prose-acceptance-removed-v1[^"]*"/u);
     expect(page.text).toContain('id="platform-ai-view"');
     expect(page.text).toContain('id="platform-ai-button"');
     expect(page.text).toContain('id="platform-usage-view"');
@@ -1091,11 +1091,9 @@ describe("作者完整创作流程", () => {
     expect(application.text).toContain("setAiChatTabContextUsage(tab, payload.contextUsage)");
     expect(application.text).toContain('addEventListener("contextmenu"');
     expect(application.text).toContain("collapsedVolumeIds");
-    expect(application.text).toContain('data-testid="continuation-guard"');
-    expect(application.text).toContain('<details class="guard-failure-details"><summary>查看失败原因</summary>');
-    expect(application.text).not.toContain('<details class="guard-failure-details" open>');
-    expect(styles.text).toContain(".guard-failure-details summary");
-    expect(styles.text).toContain("overflow-wrap: anywhere");
+    expect(application.text).not.toContain("采纳到正文");
+    expect(application.text).not.toContain("writingSuggestion");
+    expect(styles.text).not.toContain(".guard-failure-details");
     expect(graph.text).toContain("export function buildRelationshipGraph");
     expect(graph.text).toContain("export function formatRelationshipLabel");
     expect(graph.text).toContain("export function groupRelationshipDetailsByCharacterName");
@@ -1163,7 +1161,7 @@ describe("作者完整创作流程", () => {
     expect(styles.text).toContain(".character-duplicate-pair");
   });
 
-  it("从导入作品到采纳续写、抽取时间轴并安全导出", async () => {
+  it("从导入作品到生成续写文本、验证正文边界并安全导出", async () => {
     await request(runtime.app).get("/api/health").expect(200);
     const page = await request(runtime.app).get("/").expect(200).expect("Content-Type", /html/u);
     expect(page.headers["x-frame-options"]).toBe("DENY");
@@ -1227,13 +1225,15 @@ describe("作者完整创作流程", () => {
       scope: { type: "chapter", chapterId },
       modelId: model.body.data.id
     }).expect(201);
-    const beforeAccept = await request(runtime.app).get(`/api/chapters/${chapterId}`).expect(200);
-    expect(beforeAccept.body.data.versionNo).toBe(1);
-    expect(beforeAccept.body.data.content).not.toContain("舱门关闭");
+    const beforeAttempt = await request(runtime.app).get(`/api/chapters/${chapterId}`).expect(200);
+    expect(beforeAttempt.body.data.versionNo).toBe(1);
+    expect(beforeAttempt.body.data.content).not.toContain("舱门关闭");
 
-    const accepted = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({}).expect(200);
-    expect(accepted.body.data.chapter.versionNo).toBe(2);
-    expect(accepted.body.data.chapter.content).toContain("舱门关闭");
+    const removed = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({}).expect(404);
+    expect(removed.body.error.code).toBe("ROUTE_NOT_FOUND");
+    const afterAttempt = await request(runtime.app).get(`/api/chapters/${chapterId}`).expect(200);
+    expect(afterAttempt.body.data.versionNo).toBe(1);
+    expect(afterAttempt.body.data.content).not.toContain("舱门关闭");
 
     const timelineTask = await request(runtime.app).post(`/api/works/${workId}/tasks`).send({
       taskType: "timeline-analysis",
@@ -1241,10 +1241,10 @@ describe("作者完整创作流程", () => {
     }).expect(201);
     const completedTask = await request(runtime.app).post(`/api/tasks/${timelineTask.body.data.id}/run`).send({ modelId: model.body.data.id }).expect(200);
     expect(completedTask.body.data).toMatchObject({ status: "review", progress: 100 });
-    expect(completedTask.body.data.result.candidateCount).toBe(1);
+    expect(completedTask.body.data.result.candidateCount).toBe(0);
 
     const timeline = await request(runtime.app).get(`/api/works/${workId}/timeline`).expect(200);
-    expect(timeline.body.data[0]).toMatchObject({ name: "北港启航", status: "candidate" });
+    expect(timeline.body.data).toEqual([]);
 
     const relationshipTask = await request(runtime.app).post(`/api/works/${workId}/tasks`).send({
       taskType: "relationship-analysis",
@@ -1261,7 +1261,7 @@ describe("作者完整创作流程", () => {
 
     const exported = await request(runtime.app).get(`/api/works/${workId}/export?format=json`).expect(200);
     const serialized = JSON.stringify(exported.body);
-    expect(serialized).toContain("北港启航");
+    expect(serialized).not.toContain("北港启航");
     expect(serialized).not.toContain("sk-system-test-secret");
     expect(serialized).not.toContain("encrypted_key");
 

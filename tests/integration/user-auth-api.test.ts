@@ -3366,7 +3366,7 @@ describe("用户、作品权限与操作者追踪 API", () => {
     const conversationId = String(conversation.body.data.id);
     runtime.store.addAiConversationMessage(conversationId, {
       role: "user",
-      content: "可读取的对话正文",
+      content: '可读取的对话正文 <ai_reference kind="character" id="character_secret">机密角色</ai_reference> 与 <ai_reference kind="setting" id="setting_secret">机密设定</ai_reference>',
       metadata: {
         mentionCharacterIds: [String(character.body.data.id)],
         mentionRaceIds: ["secret-race-id"],
@@ -3383,7 +3383,7 @@ describe("用户、作品权限与操作者追踪 API", () => {
 
     const collaboratorView = await collaborator.agent.get(`/api/ai-conversations/${conversationId}`).expect(200);
     expect(collaboratorView.body.data.messages[0]).toMatchObject({
-      content: "可读取的对话正文",
+      content: "可读取的对话正文 （已隐藏引用） 与 （已隐藏引用）",
       metadata: { mentionChapterIds: ["readable-chapter-id"], modelDisplayName: "保留的模型信息" }
     });
     expect(collaboratorView.body.data.messages[0].metadata).not.toHaveProperty("mentionCharacterIds");
@@ -3393,6 +3393,7 @@ describe("用户、作品权限与操作者追踪 API", () => {
     expect(collaboratorView.body.data.messages[0].metadata).not.toHaveProperty("mentionContextSettingIds");
 
     const pagedView = await collaborator.agent.get(`/api/ai-conversations/${conversationId}?page=1&limit=20`).expect(200);
+    expect(pagedView.body.data.messagesPage.items[0].content).toBe("可读取的对话正文 （已隐藏引用） 与 （已隐藏引用）");
     expect(pagedView.body.data.messagesPage.items[0].metadata).toEqual({
       mentionChapterIds: ["readable-chapter-id"],
       modelDisplayName: "保留的模型信息"
@@ -3510,11 +3511,11 @@ describe("用户、作品权限与操作者追踪 API", () => {
     expect(guards.body.data[0]).toMatchObject({ issues: [], contextRefs: {}, failure: null, restricted: true });
     expect(JSON.stringify(guards.body.data)).not.toContain("TOP_SECRET_");
 
-    const acceptDenied = await collaborator.agent.post(`/api/suggestions/${suggestionId}/accept`)
+    const acceptRemoved = await collaborator.agent.post(`/api/suggestions/${suggestionId}/accept`)
       .set("X-CSRF-Token", collaborator.csrfToken)
       .send({})
-      .expect(403);
-    expect(acceptDenied.body.error.code).toBe("WORK_MODULE_WRITE_DENIED");
+      .expect(404);
+    expect(acceptRemoved.body.error.code).toBe("ROUTE_NOT_FOUND");
 
     const skillPrepareDenied = await collaborator.agent.post(`/api/ai-conversations/${conversationId}/context/prepare`)
       .set("X-CSRF-Token", collaborator.csrfToken)

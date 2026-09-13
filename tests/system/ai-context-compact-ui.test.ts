@@ -58,7 +58,7 @@ describe("AI 对话上下文 compact 界面", () => {
     expect(application).toContain('kind: "tool"');
     expect(application).toContain('divider.className = "ai-context-compaction-divider"');
     expect(application).not.toContain("ai-process-context-compaction");
-    expect(application).toContain('writingSuggestion = streamed.writingSuggestion;');
+    expect(application).not.toContain("writingSuggestion");
     expect(application).toContain('setAiChatTabContextUsage(tab, payload.contextUsage);');
     expect(application).toContain('setAiChatTabContextUsage(tab, attachAiContextCacheHitPercent(payload.contextUsage, payload.cacheHitPercent), announcedCompaction);');
     expect(application).toContain('const announcedCompaction = contextAction === "compacted" || streamContextCompacted;');

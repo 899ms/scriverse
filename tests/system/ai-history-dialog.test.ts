@@ -62,7 +62,7 @@ describe("AI 对话历史弹窗", () => {
     expect(application.text).not.toContain('continue: "续写"');
     expect(application.text).not.toContain('polish: "润色选中文本"');
     expect(application.text).toContain('writingChapterVersion: state.chapter.versionNo');
-    expect(application.text).toContain('attachWritingSuggestion(assistantMessage, writingSuggestion');
+    expect(application.text).not.toContain("writingSuggestion");
     expect(application.text).toContain('选择章节和模型后即可开始问答；所有引用都基于已保存正文。');
     expect(application.text).not.toContain('/continue-writing 或 /polish-writing 强制加载');
     expect(application.text).toContain("function syncAiHistoryActionMenu(conversation)");
