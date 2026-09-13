@@ -17,7 +17,7 @@ describe("AI 对话流幂等前端", () => {
     expect(application).toContain('if (error?.code === "AI_IDEMPOTENT_REQUEST_IN_PROGRESS")');
     expect(application).toContain("state.aiCitations = snapshot.citations.map");
     expect(application).toContain("state.aiReferences = snapshot.references.map");
-    expect(application).toContain("setAiPromptText(snapshot.text);");
+    expect(application).toContain("setAiPromptMarkup(snapshot.markup ?? snapshot.text);");
     expect(application).toContain('toast("当前对话仍在生成回复，请等待完成或取消后再发送", "error")');
     expect(application).toContain('$("#ai-prompt").focus();');
     expect(application).toContain('eventName === "request_status"');
