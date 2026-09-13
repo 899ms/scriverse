@@ -16,8 +16,9 @@ describe("AI 对话图片附件界面", () => {
     expect(page).toContain('id="ai-image-preview-dialog" class="dialog ai-image-preview-dialog"');
     expect(page).toContain('id="ai-image-preview-image"');
     expect(page).toContain('class="ai-image-button-icon"');
-    expect(page).toContain('<rect x="3.5" y="4.5" width="17" height="15" rx="2"></rect>');
-    expect(page).toContain('<circle cx="9" cy="10" r="1.5"></circle>');
+    expect(page).toContain('<path d="M16 5h6"></path><path d="M19 2v6"></path>');
+    expect(page).toContain('<path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5"></path>');
+    expect(page).toContain('<circle cx="9" cy="9" r="2"></circle>');
     expect(page).toContain('accept="image/png,image/jpeg,.jpg,.jpeg"');
     expect(application).toContain("function aiModelSupportsImageInput()");
     expect(application).toContain("function addAiImageFiles(files)");
