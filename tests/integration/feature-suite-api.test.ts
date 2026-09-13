@@ -1753,7 +1753,7 @@ describe("续写守卫和全书关系 Map-Reduce", () => {
     const { workId, chapters } = await seedWork(runtime);
     const lin = await request(runtime.app).post(`/api/works/${workId}/characters`).send({ name: "林舟", gender: "male", aliases: ["阿舟"], currentState: { location: "北港" } }).expect(201);
     const shen = await request(runtime.app).post(`/api/works/${workId}/characters`).send({ name: "沈星" }).expect(201);
-    const relationship = await request(runtime.app).post(`/api/works/${workId}/relationships`).send({
+    await request(runtime.app).post(`/api/works/${workId}/relationships`).send({
       fromCharacterId: lin.body.data.id,
       toCharacterId: shen.body.data.id,
       category: "social",
@@ -1778,24 +1778,10 @@ describe("续写守卫和全书关系 Map-Reduce", () => {
     expect(prompts.some((prompt) => prompt.includes("当前位置") || prompt.includes('"location":"北港"'))).toBe(true);
     expect(prompts.some((prompt) => prompt.includes("当前章大纲") && prompt.includes("旧信"))).toBe(true);
     expect(prompts.every((prompt) => /(?:林舟 — 沈星|沈星 — 林舟)/u.test(prompt) && prompt.includes("长期信任、失联重逢"))).toBe(true);
-    const stale = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({ content: "作者改过的候选" }).expect(409);
-    expect(stale.body.error.code).toBe("GUARD_STALE");
-    await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/guard`).send({ content: "作者改过的候选" }).expect(201);
-    const character = (await request(runtime.app).get(`/api/works/${workId}/characters`).expect(200)).body.data[0];
-    await request(runtime.app).patch(`/api/characters/${character.id}`).send({ currentState: { location: "主星" } }).expect(200);
-    const knowledgeStale = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({ content: "作者改过的候选" }).expect(409);
-    expect(knowledgeStale.body.error.code).toBe("GUARD_STALE");
-    await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/guard`).send({ content: "作者改过的候选" }).expect(201);
-    await request(runtime.app).patch(`/api/characters/${character.id}`).send({ gender: "female" }).expect(200);
-    const genderStale = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({ content: "作者改过的候选" }).expect(409);
-    expect(genderStale.body.error.code).toBe("GUARD_STALE");
-    await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/guard`).send({ content: "作者改过的候选" }).expect(201);
-    await request(runtime.app).patch(`/api/relationships/${relationship.body.data.id}`).send({ keywords: ["共同守望", "重新建立信任"] }).expect(200);
-    const relationshipStale = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({ content: "作者改过的候选" }).expect(409);
-    expect(relationshipStale.body.error.code).toBe("GUARD_STALE");
-    await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/guard`).send({ content: "作者改过的候选" }).expect(201);
-    const accepted = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({ content: "作者改过的候选" }).expect(200);
-    expect(accepted.body.data.chapter.content).toContain("作者改过的候选");
+    const removed = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({ content: "作者改过的候选" }).expect(404);
+    expect(removed.body.error.code).toBe("ROUTE_NOT_FOUND");
+    const unchanged = await request(runtime.app).get(`/api/chapters/${chapters[0].id}`).expect(200);
+    expect(unchanged.body.data).toMatchObject({ content: "林舟在北港见到沈星。沈星说：我们一直是朋友。", versionNo: 1 });
   });
 
   it("守卫模型返回非法结果时保留续写建议并明确标记检查失败", async () => {
@@ -1816,8 +1802,8 @@ describe("续写守卫和全书关系 Map-Reduce", () => {
     }).expect(201);
     expect(suggestion.body.data.guard.status).toBe("failed");
     expect(suggestion.body.data.guard.failure).toContain("有效 JSON");
-    const blocked = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({}).expect(409);
-    expect(blocked.body.error.code).toBe("GUARD_FAILED");
+    const removed = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({}).expect(404);
+    expect(removed.body.error.code).toBe("ROUTE_NOT_FOUND");
     const unchanged = await request(runtime.app).get(`/api/chapters/${chapters[0].id}`).expect(200);
     expect(unchanged.body.data.versionNo).toBe(1);
   });

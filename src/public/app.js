@@ -18337,7 +18337,6 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
     let assistantMessage;
     let assistantMetadata = {};
     let persistedStreamMessage = null;
-    let writingSuggestion = null;
     const streamed = await streamChat(requestHolder, aiRetryStreamRequestBody({
       instruction,
       ...(sceneDirection ? { sceneDirection } : {}),
@@ -18354,7 +18353,6 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
     assistantContent = streamed.content;
     assistantMessage = streamed.message;
     assistantMetadata = streamed.metadata;
-    writingSuggestion = streamed.writingSuggestion;
     persistedStreamMessage = streamed.messageId ? { id: streamed.messageId, createdAt: streamed.createdAt } : null;
     applyAiConversationTitle(streamed.conversationTitle, streamedRequest.conversationId);
     try {
@@ -18384,7 +18382,6 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
           attachMessageIdentity(assistantMessage, persistedAssistantMessage.id);
         }
       }
-      if (writingSuggestion && assistantMessage) attachWritingSuggestion(assistantMessage, writingSuggestion, { tab });
     } catch (error) {
       if (isAiRequestCancellation(error, requestHolder.snapshot) || !aiRequestTargetsCurrentState(requestHolder.snapshot)) throw error;
       setAiChatTabStatus(tab, "error");
@@ -18555,7 +18552,6 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
   let persistedMessageId = null;
   let persistedMessageCreatedAt = null;
   let conversationTitle = null;
-  let writingSuggestion = null;
   let question = null;
   let persistedUserMessage = null;
   let contextAction = "ready";
@@ -18734,13 +18730,6 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
         persistedMessageId = typeof payload.messageId === "string" ? payload.messageId : null;
         persistedMessageCreatedAt = typeof payload.messageCreatedAt === "string" ? payload.messageCreatedAt : null;
         conversationTitle = typeof payload.conversationTitle === "string" ? payload.conversationTitle : null;
-        writingSuggestion = payload.writingSuggestion && typeof payload.writingSuggestion === "object"
-          ? payload.writingSuggestion
-          : null;
-        const writingSuggestionFailed = writingSuggestion?.guard?.status === "failed"
-          || writingSuggestion?.toolCalls?.some((toolCall) => toolCall.status === "failed")
-          || writingSuggestion?.processSteps?.some((step) => step?.toolCall?.status === "failed");
-        if (writingSuggestionFailed) setAiChatTabStatus(tab, "error");
         const announcedCompaction = contextAction === "compacted" || streamContextCompacted;
         setAiChatTabContextUsage(tab, attachAiContextCacheHitPercent(payload.contextUsage, payload.cacheHitPercent), announcedCompaction);
         await Promise.all([typewriter.finish(), finishProcessStepTypewriters()]);
@@ -18760,10 +18749,6 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
           toolCalls,
           processSteps,
           processDurationMs,
-          ...(writingSuggestion ? {
-            activeSkills: [writingSuggestion.taskType === "continue" ? "continue-writing" : "polish-writing"],
-            writingSuggestionId: writingSuggestion.id
-          } : {})
         };
         renderStreamingProcessSteps(true, processDurationMs);
         meta.textContent = formatAiMessageMeta(payload.model?.displayName, payload.outputTokens, payload.cacheHitPercent, "", processDurationMs);
@@ -18781,7 +18766,7 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
     assertAiRequestCurrent(requestHolder.snapshot);
     if (streamError) throw streamError;
     assertAiStreamCompleted(streamCompleted);
-    return { action: warningOnly ? "warn" : contextAction, content: streamedText, message, metadata: generatedMetadata, messageId: persistedMessageId, createdAt: persistedMessageCreatedAt, conversationTitle, writingSuggestion, userMessage: persistedUserMessage, question };
+    return { action: warningOnly ? "warn" : contextAction, content: streamedText, message, metadata: generatedMetadata, messageId: persistedMessageId, createdAt: persistedMessageCreatedAt, conversationTitle, userMessage: persistedUserMessage, question };
   } catch (error) {
     const streamFailure = error instanceof Error ? error : new Error(String(error ?? "AI 流式调用失败"));
     const interruptionCode = typeof streamFailure.code === "string" ? streamFailure.code.slice(0, 100) : "AI_STREAM_FAILED";
@@ -19003,107 +18988,8 @@ function appendMessage(role, text, citations = [], createdAt = null, metadata = 
   if (isFailure) renderMessageCardActions(message);
   attachMessageIdentity(message, messageId);
   feed.append(message);
-  const writingSuggestionId = role === "assistant" && typeof metadata?.writingSuggestionId === "string"
-    ? metadata.writingSuggestionId
-    : "";
-  if (writingSuggestionId && !isFailure && !isInterrupted) {
-    api(`/api/suggestions/${encodeURIComponent(writingSuggestionId)}`)
-      .then((suggestion) => attachWritingSuggestion(message, suggestion, { tab }))
-      .catch(() => undefined);
-  }
   scrollAiFeedToBottom(feed);
   return message;
-}
-
-function continuationGuardMarkup(guard) {
-  if (!guard) return "";
-  const issues = Array.isArray(guard.issues) ? guard.issues : [];
-  const failure = typeof guard.failure === "string" && guard.failure.trim()
-    ? guard.failure.trim()
-    : "无法完成检查，请谨慎采纳";
-  return `<section class="guard-card ${esc(guard.status)}" data-testid="continuation-guard"><strong>${guard.status === "clear" ? "一致性守卫：未发现冲突" : guard.status === "warning" ? `一致性守卫：发现 ${issues.length} 项风险` : "一致性守卫：检查失败"}</strong>${guard.status === "failed" ? `<details class="guard-failure-details"><summary>查看失败原因</summary><p>${esc(failure)}</p></details>` : issues.map((issue) => `<p><b>${esc(levelLabel(issue.severity))} · ${esc(reviewItemTypeLabel(issue.type))}</b> ${esc(issue.title)}${issue.description ? `：${esc(issue.description)}` : ""}</p>`).join("")}</section>`;
-}
-
-async function applyAcceptedWritingSuggestion(message, suggestion) {
-  if (state.work?.id === suggestion.workId && state.chapter?.id === suggestion.chapterId
-    && (state.dirty || chapterSaveInFlight || chapterSaveGuardInFlight)) {
-    throw new Error("当前章节有未保存修改或正在保存，请先完成保存，再重新生成正文建议");
-  }
-  const result = await api(`/api/suggestions/${encodeURIComponent(suggestion.id)}/accept`, { method: "POST", body: {} });
-  const workId = result.chapter.workId;
-  if (state.work?.id === workId && state.chapter?.id === result.chapter.id
-    && !state.dirty && !chapterSaveInFlight && !chapterSaveGuardInFlight) {
-    cancelChapterAutoSave();
-    state.chapter = result.chapter;
-    resetChapterDraftLineIds(state.chapter);
-    lastSavedChapterSnapshot = { chapterId: state.chapter.id, title: state.chapter.title, content: state.chapter.content };
-    $("#chapter-title").value = state.chapter.title;
-    $("#chapter-content").value = state.chapter.content;
-    scheduleChapterLineNumbers();
-    updateChapterStats();
-  }
-  if (state.work?.id === workId) {
-    const work = await api(`/api/works/${workId}`);
-    if (state.work?.id === workId) {
-      state.work = work;
-      renderTree();
-    }
-  }
-  message.querySelector("[data-writing-suggestion-actions]").innerHTML = "<span>已采纳并生成新版本</span>";
-  toast("AI 建议已采纳，正文已生成新版本");
-}
-
-function attachWritingSuggestion(message, suggestion, options = {}) {
-  if (!suggestion || suggestion.action === "note" || !suggestion.id) return message;
-  const suggestionId = String(suggestion.id);
-  if (message.dataset.writingSuggestionId === suggestionId) return message;
-  message.dataset.writingSuggestionId = suggestionId;
-  message.querySelector("[data-writing-suggestion-ui]")?.remove();
-  const heading = message.querySelector(".message-heading > span");
-  if (heading) heading.textContent = "助手建议";
-  const host = document.createElement("div");
-  host.dataset.writingSuggestionUi = "";
-  host.className = "writing-suggestion-ui";
-  host.innerHTML = `${continuationGuardMarkup(suggestion.guard)}<div class="message-actions" data-writing-suggestion-actions></div>`;
-  const actions = host.querySelector("[data-writing-suggestion-actions]");
-  if (suggestion.status === "accepted") {
-    actions.innerHTML = "<span>已采纳并生成新版本</span>";
-  } else if (suggestion.status === "rejected") {
-    actions.innerHTML = "<span>已拒绝</span>";
-  } else {
-    actions.innerHTML = '<button type="button" data-action="accept">采纳到正文</button><button type="button" data-action="reject">拒绝</button>';
-    actions.querySelector('[data-action="accept"]').addEventListener("click", async () => {
-      try {
-        await applyAcceptedWritingSuggestion(message, suggestion);
-      } catch (error) {
-        toast(error.message, "error");
-      }
-    });
-    actions.querySelector('[data-action="reject"]').addEventListener("click", async () => {
-      try {
-        await api(`/api/suggestions/${encodeURIComponent(suggestion.id)}/reject`, { method: "POST", body: {} });
-        actions.innerHTML = "<span>已拒绝</span>";
-      } catch (error) {
-        toast(error.message, "error");
-      }
-    });
-  }
-  message.append(host);
-  const tab = options.tab ?? activeAiChatTab();
-  scrollAiFeedToBottom(options.feed ?? tab?.feed ?? $("#ai-feed"));
-  return message;
-}
-
-function appendSuggestion(suggestion, createdAt = null, messageId = null, options = {}) {
-  const tab = options.tab ?? activeAiChatTab();
-  const feed = options.feed ?? tab?.feed ?? $("#ai-feed");
-  const message = appendMessage("assistant", suggestion.content, [], createdAt, {
-    modelDisplayName: suggestion.model?.displayName,
-    outputTokens: suggestion.outputTokens,
-    cacheHitPercent: suggestion.cacheHitPercent,
-    processDurationMs: suggestion.processDurationMs
-  }, messageId, { tab, feed });
-  return attachWritingSuggestion(message, suggestion, { tab, feed });
 }
 
 function chapterVersionCompareOption(version) {

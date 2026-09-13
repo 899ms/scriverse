@@ -360,11 +360,12 @@ try {
   });
   assert.equal(suggestion.guard.status, "clear");
   await api("PATCH", `/characters/${lin.id}`, { currentState: { location: "主星" } });
-  await expectApiError("POST", `/suggestions/${suggestion.id}/accept`, {}, 409, "GUARD_STALE");
-  await api("POST", `/suggestions/${suggestion.id}/guard`, {});
-  const accepted = await api<Entity>("POST", `/suggestions/${suggestion.id}/accept`, {});
-  assert.match(accepted.chapter.content, /继续检查那封旧信/u);
-  checked("continuation-guard", "knowledge changes invalidate a guard and a rerun permits acceptance");
+  const chapterBeforeRemovedAcceptance = await api<Entity>("GET", `/chapters/${firstChapter.id}`);
+  await expectApiError("POST", `/suggestions/${suggestion.id}/accept`, {}, 404, "ROUTE_NOT_FOUND");
+  const chapterAfterRemovedAcceptance = await api<Entity>("GET", `/chapters/${firstChapter.id}`);
+  assert.equal(chapterAfterRemovedAcceptance.content, chapterBeforeRemovedAcceptance.content);
+  assert.equal(chapterAfterRemovedAcceptance.versionNo, chapterBeforeRemovedAcceptance.versionNo);
+  checked("continuation-guard", "AI suggestions cannot be accepted into chapter prose");
 
   const relationshipTask = await api<Entity>("POST", `/works/${disposableWorkId}/tasks`, {
     taskType: "relationship-analysis",

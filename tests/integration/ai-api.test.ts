@@ -3545,7 +3545,7 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(mismatch.body.error.code).toBe("CHAPTER_WORK_MISMATCH");
   });
 
-  it("生成建议不改正文，作者采纳后才生成新版本", async () => {
+  it("生成建议不改正文且不再提供采纳接口", async () => {
     const { providerId, modelId } = await configureAi();
     await request(runtime.app).post(`/api/providers/${providerId}/test`).send({}).expect(200);
     expectedMaxTokens = 64_000;
@@ -3563,9 +3563,10 @@ describe("AI 供应商、模型与建议 API", () => {
     const unchanged = await request(runtime.app).get(`/api/chapters/${chapterId}`).expect(200);
     expect(unchanged.body.data).toMatchObject({ content: "林舟启动了飞船。", versionNo: 1 });
 
-    const accepted = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({}).expect(200);
-    expect(accepted.body.data.chapter.content).toContain("飞船缓缓驶离北港");
-    expect(accepted.body.data.chapter.versionNo).toBe(2);
+    const removed = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({}).expect(404);
+    expect(removed.body.error.code).toBe("ROUTE_NOT_FOUND");
+    const stillUnchanged = await request(runtime.app).get(`/api/chapters/${chapterId}`).expect(200);
+    expect(stillUnchanged.body.data).toMatchObject({ content: "林舟启动了飞船。", versionNo: 1 });
 
     const calls = await request(runtime.app).get(`/api/works/${workId}/ai-calls`).expect(200);
     const continuationCall = calls.body.data.find((call: { taskType: string }) => call.taskType === "continue");
@@ -3575,7 +3576,7 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(suggestion.body.data.guard).toMatchObject({ status: "clear", issues: [] });
   });
 
-  it("拒绝采纳基于旧正文版本的建议", async () => {
+  it("拒绝为基于旧正文版本的建议重新运行守卫", async () => {
     const { providerId, modelId } = await configureAi();
     await request(runtime.app).post(`/api/providers/${providerId}/test`).send({});
     const suggestion = await request(runtime.app).post(`/api/works/${workId}/suggestions`).send({
@@ -3585,7 +3586,7 @@ describe("AI 供应商、模型与建议 API", () => {
       modelId
     }).expect(201);
     await request(runtime.app).patch(`/api/chapters/${chapterId}`).send({ content: "作者已经重写正文。" }).expect(200);
-    const stale = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/accept`).send({}).expect(409);
+    const stale = await request(runtime.app).post(`/api/suggestions/${suggestion.body.data.id}/guard`).send({}).expect(409);
     expect(stale.body.error.code).toBe("STALE_SUGGESTION");
   });
 
@@ -3602,7 +3603,7 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("问答中自动加载续写 Skill 并保留一致性守卫与采纳链路", async () => {
+  it("问答中自动加载续写 Skill 但只返回对话文本", async () => {
     const { providerId, modelId } = await configureAi();
     let streamSystemPrompt = "";
     let streamUserMessages = "";
@@ -3646,31 +3647,20 @@ describe("AI 供应商、模型与建议 API", () => {
     const completed = JSON.parse(streamed.text.match(/event: complete\ndata: ([^\n]+)/u)?.[1] ?? "{}") as {
       conversationId: string;
       contextUsage: { tokenDistribution: { skillsTokens: number } };
-      writingSuggestion: Record<string, unknown>;
     };
     expect(completed.contextUsage.tokenDistribution.skillsTokens).toBeGreaterThan(0);
-    expect(completed.writingSuggestion).toMatchObject({
-      taskType: "continue",
-      action: "append",
-      status: "pending",
-      guard: { status: "clear" }
-    });
+    expect(completed).not.toHaveProperty("writingSuggestion");
+    expect(completed).not.toHaveProperty("suggestionId");
     const conversation = await request(runtime.app).get(`/api/ai-conversations/${completed.conversationId}`).expect(200);
     expect(conversation.body.data.taskType).toBe("chat");
-    expect(conversation.body.data.messages.at(-1).metadata).toMatchObject({
-      activeSkills: ["continue-writing"],
-      writingSuggestionId: completed.writingSuggestion.id
-    });
-
-    const accepted = await request(runtime.app)
-      .post(`/api/suggestions/${completed.writingSuggestion.id}/accept`)
-      .send({})
-      .expect(200);
-    expect(accepted.body.data.chapter.content).toBe("林舟启动了飞船。\n\n飞船驶入夜色。");
-    expect(accepted.body.data.chapter.versionNo).toBe(2);
+    expect(conversation.body.data.messages.at(-1).metadata).toMatchObject({ activeSkills: ["continue-writing"] });
+    expect(conversation.body.data.messages.at(-1).metadata).not.toHaveProperty("writingSuggestionId");
+    const chapter = await request(runtime.app).get(`/api/chapters/${chapterId}`).expect(200);
+    expect(chapter.body.data).toMatchObject({ content: "林舟启动了飞船。", versionNo: 1 });
+    expect(runtime.database.get("SELECT COUNT(*) AS count FROM ai_suggestions WHERE work_id = ?", workId)).toEqual({ count: 0 });
   });
 
-  it("问答中的润色 Skill 按本轮精确选区替换重复文本", async () => {
+  it("问答中的润色 Skill 使用精确选区但不替换正文", async () => {
     const { providerId, modelId } = await configureAi();
     const original = "重复句。中间段。重复句。";
     await request(runtime.app).patch(`/api/chapters/${chapterId}`).send({ content: original }).expect(200);
@@ -3707,16 +3697,15 @@ describe("AI 供应商、模型与建议 API", () => {
       modelId
     }).expect(200);
     expect(fetchMock.mock.calls.some((call) => String(call[1]?.body).includes("/polish-writing"))).toBe(false);
-    const completed = JSON.parse(streamed.text.match(/event: complete\ndata: ([^\n]+)/u)?.[1] ?? "{}") as {
-      writingSuggestion: { id: string; taskType: string; action: string };
-    };
-    expect(completed.writingSuggestion).toMatchObject({ taskType: "polish", action: "replace-selection" });
-
-    const accepted = await request(runtime.app)
-      .post(`/api/suggestions/${completed.writingSuggestion.id}/accept`)
-      .send({})
-      .expect(200);
-    expect(accepted.body.data.chapter.content).toBe("重复句。中间段。夜色重复回响。");
+    const completed = JSON.parse(streamed.text.match(/event: complete\ndata: ([^\n]+)/u)?.[1] ?? "{}") as { conversationId: string };
+    expect(completed).not.toHaveProperty("writingSuggestion");
+    expect(completed).not.toHaveProperty("suggestionId");
+    const conversation = await request(runtime.app).get(`/api/ai-conversations/${completed.conversationId}`).expect(200);
+    expect(conversation.body.data.messages.at(-1).metadata).toMatchObject({ activeSkills: ["polish-writing"] });
+    expect(conversation.body.data.messages.at(-1).metadata).not.toHaveProperty("writingSuggestionId");
+    const chapter = await request(runtime.app).get(`/api/chapters/${chapterId}`).expect(200);
+    expect(chapter.body.data).toMatchObject({ content: original, versionNo: 2 });
+    expect(runtime.database.get("SELECT COUNT(*) AS count FROM ai_suggestions WHERE work_id = ?", workId)).toEqual({ count: 0 });
   });
 
   it("usage 将 Skill 元数据和激活正文计入 skills，角色扮演保持为零", async () => {
@@ -3758,7 +3747,7 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(roleplayUsage.body.data.usage.tokenDistribution.skillsTokens).toBe(0);
   });
 
-  it("侧栏问答通过 SSE 逐段输出并在完整读取后记录建议", async () => {
+  it("侧栏问答通过 SSE 逐段输出并在完整读取后记录回复", async () => {
     const { providerId, modelId } = await configureAi();
     await request(runtime.app).post(`/api/providers/${providerId}/test`).send({}).expect(200);
     await request(runtime.app).patch(`/api/works/${workId}/ai-settings`).send({ agentTools: [] }).expect(200);
@@ -3811,7 +3800,7 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(streamed.text).toContain('"content":"先读取现有上下文。"');
 
     const suggestions = await request(runtime.app).get(`/api/works/${workId}/suggestions`).expect(200);
-    expect(suggestions.body.data[0]).toMatchObject({ taskType: "chat", action: "note", content: "飞船离港" });
+    expect(suggestions.body.data).toEqual([]);
     const calls = await request(runtime.app).get(`/api/works/${workId}/ai-calls`).expect(200);
     expect(calls.body.data[0]).toMatchObject({ taskType: "chat", status: "completed", outputChars: 4 });
     const usage = await request(runtime.app).get(`/api/works/${workId}/ai-settings/usage`).expect(200);
@@ -4470,11 +4459,14 @@ describe("AI 供应商、模型与建议 API", () => {
       scope: { type: "none" },
       modelId
     }).expect(200).expect("Content-Type", /text\/event-stream/u);
+    const complete = JSON.parse(streamed.text.match(/event: complete\ndata: ([^\n]+)/u)?.[1] ?? "{}") as { conversationId?: string };
+    const conversation = await request(runtime.app).get(`/api/ai-conversations/${complete.conversationId}`).expect(200);
     const suggestions = await request(runtime.app).get(`/api/works/${workId}/suggestions`).expect(200);
 
     expect(streamedDeltas(streamed.text)).toBe("安全前缀 sk-s*****lue 安全后缀s");
     expect(streamed.text).not.toContain("sk-sensitive-test-value");
-    expect(suggestions.body.data[0].content).toBe("安全前缀 sk-s*****lue 安全后缀s");
+    expect(conversation.body.data.messages.at(-1).content).toBe("安全前缀 sk-s*****lue 安全后缀s");
+    expect(suggestions.body.data).toEqual([]);
   });
 
   it("上游读取异常时安全刷新尾部且保持失败持久化语义", async () => {
@@ -4768,9 +4760,10 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(completePayload.processDurationMs).toBeGreaterThanOrEqual(0);
     expect(Number.isInteger(completePayload.processDurationMs)).toBe(true);
     const streamedConversation = await request(runtime.app).get(`/api/ai-conversations/${completePayload.conversationId}`).expect(200);
+    expect(streamedConversation.body.data.messages.at(-1).content).toBe("已读取目录。");
     expect(streamedConversation.body.data.messages.at(-1).metadata.processDurationMs).toBe(completePayload.processDurationMs);
     const generatedSuggestions = await request(runtime.app).get(`/api/works/${workId}/suggestions`).expect(200);
-    expect(generatedSuggestions.body.data[0].content).toBe("已读取目录。");
+    expect(generatedSuggestions.body.data).toEqual([]);
 
     const conversation = await request(runtime.app).post(`/api/works/${workId}/ai-conversations`).send({}).expect(201);
     const toolCalls = [{ id: "stream-tool", name: "story_index", calledAt: "2026-07-17T12:34:56.000Z", arguments: { chapterOffset: 0, limit: 1 }, status: "completed", result: { ok: true, data: { totalChapters: 1 } } }];
