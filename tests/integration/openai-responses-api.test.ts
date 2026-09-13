@@ -300,13 +300,18 @@ describe("OpenAI Responses 与 Anthropic 多模态请求层", () => {
       modelId: "gpt-5-chat-text",
       multimodalEnabled: false
     }).expect(201);
+    const upstreamRequestCount = fetchMock.mock.calls.length;
     const rejected = await request(runtime.app).post(`/api/works/${workId}/chat/stream`).send({
       instruction: "请描述这张图片。",
       scope: { type: "none" },
       modelId: textModel.body.data.id,
       imageAttachmentIds: [attachmentId]
     }).expect(400);
-    expect(rejected.body.error).toMatchObject({ code: "MODEL_NOT_MULTIMODAL" });
+    expect(rejected.body.error).toMatchObject({
+      code: "MODEL_NOT_MULTIMODAL",
+      message: "当前选择的模型不是多模态模型，无法处理图片附件"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(upstreamRequestCount);
   });
 
   it("多轮聊天会重新把历史图片放回 OpenAI Responses 请求", async () => {

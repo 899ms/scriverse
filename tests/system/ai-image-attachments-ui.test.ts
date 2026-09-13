@@ -12,7 +12,8 @@ describe("AI 对话图片附件界面", () => {
     ]);
 
     expect(page).toContain('id="ai-image-attachments" class="ai-image-attachments hidden"');
-    expect(page).toContain('id="ai-attachment-button" class="ai-attachment-button hidden"');
+    expect(page).toContain('id="ai-attachment-button" class="ai-attachment-button"');
+    expect(page).toContain('title="选择多模态模型后可添加图片附件" disabled');
     expect(page).toContain('id="ai-image-preview-dialog" class="dialog ai-image-preview-dialog"');
     expect(page).toContain('id="ai-image-preview-image"');
     expect(page).toContain('class="ai-image-button-icon"');
@@ -21,6 +22,8 @@ describe("AI 对话图片附件界面", () => {
     expect(page).toContain('<circle cx="9" cy="9" r="2"></circle>');
     expect(page).toContain('accept="image/png,image/jpeg,.jpg,.jpeg"');
     expect(application).toContain("function aiModelSupportsImageInput()");
+    expect(application).toContain("button.disabled = !enabled || aiInteractionBusy();");
+    expect(application).not.toContain('button.classList.toggle("hidden", !enabled);');
     expect(application).toContain("function addAiImageFiles(files)");
     expect(application).toContain("function openAiImagePreview(attachment, ordinal = null)");
     expect(application).toContain("function appendAiMessageImageAttachments(message, attachments)");
@@ -49,6 +52,8 @@ describe("AI 对话图片附件界面", () => {
     expect(styles).toContain(".ai-image-preview-body { display: grid; place-items: center; min-height: 180px; max-height: calc(88vh - 106px); padding: 16px 20px 20px; overflow: auto; background: var(--paper);");
     expect(styles).toContain(".ai-message-image-preview { display: block; width: 68px; height: 68px;");
     expect(styles).toContain(".ai-image-button-icon, .ai-scene-button-icon { width: 14px; height: 14px;");
+    expect(styles).toContain(".ai-attachment-button:disabled { border-color: var(--line); background: var(--surface); color: var(--muted); cursor: not-allowed; opacity: .56; }");
+    expect(page).toContain("feature=ai-attachment-disabled-v1");
     expect(styles).toContain("border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line));");
   });
 });
