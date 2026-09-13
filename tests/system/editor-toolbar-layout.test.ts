@@ -9,7 +9,7 @@ describe("编辑器工具栏布局", () => {
     while (runtimes.length) await runtimes.pop()?.close();
   });
 
-  it("让章节路径独占首行，并统一侧栏工具按钮尺寸", async () => {
+  it("压缩章节标题栏并保留编辑操作与侧栏工具", async () => {
     const runtime = createRuntime({
       databasePath: ":memory:",
       masterSecret: "editor-toolbar-layout-system-test-secret",
@@ -71,9 +71,9 @@ describe("编辑器工具栏布局", () => {
     expect(styles.text).toContain(".line-citation-menu-separator { height: 1px; margin: 5px 2px; background: var(--line); }");
     expect(styles.text).toContain("font-family: var(--font-mono), monospace; font-size: 10px; line-height: 1.6");
     expect(page.text).toContain(">编辑</button>");
-    expect(styles.text).toContain('grid-template-areas: "path path" "title actions"');
-    expect(styles.text).toContain('background: transparent; font-size: 25px; padding: 0;');
-    expect(styles.text).toContain('.editor-actions { grid-area: actions; display: flex; align-items: center; gap: 8px; }');
+    expect(styles.text).toContain('grid-template-areas: "title actions" "path actions"');
+    expect(styles.text).toContain('height: 26px; border: 0; border-radius: 0; background: transparent; font-size: 20px;');
+    expect(styles.text).toContain('.editor-actions { grid-area: actions; display: flex; align-items: center; gap: 6px;');
     expect(styles.text).toContain('.editor-view .editor-actions > button { min-height: 32px; padding: 6px 10px; font-size: 11px; }');
     expect(styles.text).toContain(".editor-view.is-read-only #tidy-blank-lines-button");
     expect(styles.text).toContain(".editor-view.is-read-only #save-button");
@@ -168,9 +168,11 @@ describe("编辑器工具栏布局", () => {
     expect(styles.text).toContain('@container (max-width: 120px)');
     expect(styles.text).toContain('@container (max-width: 88px)');
     expect(styles.text).toContain('@container editor-workspace (max-width: 720px)');
-    expect(styles.text).toContain('.editor-toolbar { grid-template-areas: "path" "title" "actions";');
-    expect(styles.text).toContain('.chapter-title { min-height: 36px; }');
-    expect(styles.text).toContain('.chapter-title { font-size: 21px; }');
+    expect(styles.text).toContain('.editor-toolbar { grid-template-areas: "title" "path" "actions";');
+    expect(styles.text).toContain('.editor-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 4px; padding-left: 0; border-left: 0; }');
+    expect(styles.text).not.toContain('.editor-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }');
+    expect(page.text).toMatch(/styles\.css\?[^"\n]*feature=chapter-header-compact-v4/u);
+    expect(styles.text).toContain('.chapter-title { font-size: 18px; }');
     expect(styles.text).toContain('.editor-view .editor-actions > button { min-width: 0; min-height: 34px; padding-inline: 6px; font-size: 11px; }');
     expect(styles.text).toContain('.vditor-editor-host .vditor-toolbar { display: flex; align-items: center; flex: 0 0 auto; }');
     expect(styles.text).toContain('.markdown-word-count { display: inline-flex; align-items: center; align-self: center; min-height: 28px; margin-left: 24px;');
