@@ -532,9 +532,9 @@ export function isPrivateAiEndpointsExplicitlyEnabled(environment: NodeJS.Proces
 /** 仅在环境变量被显式开启时写入启动警告；开发环境默认放行不会触发。 */
 export function warnIfPrivateAiEndpointsEnabled(environment: NodeJS.ProcessEnv): void {
   if (!isPrivateAiEndpointsExplicitlyEnabled(environment)) return;
-  logger.warn("security.private_ai_endpoints.enabled", {
+  logger.warn("security.ai_provider_endpoint_validation.disabled", {
     env: PRIVATE_AI_ENDPOINTS_ENV,
-    message: "Private and loopback AI provider endpoints are allowed. This weakens SSRF protection and can expose credentials to local or internal services. Enable it only when you must reach a trusted local model."
+    message: "AI provider endpoint validation is disabled. This weakens SSRF protection and can expose credentials to local or internal services. Enable it only for a trusted deployment that requires private, link-local, or fake-IP upstream addresses."
   });
 }
 
