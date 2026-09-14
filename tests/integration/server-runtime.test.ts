@@ -77,10 +77,10 @@ describe("本地服务运行时", () => {
     try {
       warnIfPrivateAiEndpointsEnabled({ NODE_ENV: "development" });
       warnIfPrivateAiEndpointsEnabled({ NODE_ENV: "production" });
-      expect(warnSpy).not.toHaveBeenCalledWith("security.private_ai_endpoints.enabled", expect.anything());
+      expect(warnSpy).not.toHaveBeenCalledWith("security.ai_provider_endpoint_validation.disabled", expect.anything());
 
       warnIfPrivateAiEndpointsEnabled({ NODE_ENV: "production", [PRIVATE_AI_ENDPOINTS_ENV]: "true" });
-      expect(warnSpy).toHaveBeenCalledWith("security.private_ai_endpoints.enabled", expect.objectContaining({
+      expect(warnSpy).toHaveBeenCalledWith("security.ai_provider_endpoint_validation.disabled", expect.objectContaining({
         env: PRIVATE_AI_ENDPOINTS_ENV
       }));
     } finally {
@@ -104,11 +104,56 @@ describe("本地服务运行时", () => {
         }
       });
       runningServers.push(running);
-      expect(warnSpy).toHaveBeenCalledWith("security.private_ai_endpoints.enabled", expect.objectContaining({
+      expect(warnSpy).toHaveBeenCalledWith("security.ai_provider_endpoint_validation.disabled", expect.objectContaining({
         env: PRIVATE_AI_ENDPOINTS_ENV
       }));
     } finally {
       warnSpy.mockRestore();
+    }
+  });
+
+  it("显式开启私有 AI 地址后会跳过供应商地址校验", async () => {
+    const root = mkdtempSync(join(tmpdir(), "scriverse-fake-ip-ai-"));
+    roots.push(root);
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "fake-ip-model" }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: "连接成功" } }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const running = await startLocalServer({
+        host: "127.0.0.1",
+        port: 0,
+        dataDirectory: root,
+        databasePath: join(root, "novel.db"),
+        env: {
+          NODE_ENV: "production",
+          [PRIVATE_AI_ENDPOINTS_ENV]: "true"
+        }
+      });
+      runningServers.push(running);
+      const provider = running.runtime.ai.createProvider({
+        name: "Fake IP 供应商",
+        baseUrl: "https://198.18.0.7/v1",
+        apiKey: "fake-ip-test-key",
+        status: "enabled"
+      });
+
+      await expect(running.runtime.ai.testProvider(String(provider.id))).resolves.toMatchObject({
+        ok: true,
+        availableModels: ["fake-ip-model"]
+      });
+      expect(requestedUrls).toEqual(expect.arrayContaining([
+        "https://198.18.0.7/v1/models",
+        "https://198.18.0.7/v1/chat/completions"
+      ]));
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

@@ -1027,6 +1027,8 @@ export type RuntimeOptions = {
   security?: RuntimeSecurityOptions;
   /** 仅供受信任的本机嵌入运行时：完全不安装 AI endpoint validator。 */
   disableAiEndpointValidation?: boolean;
+  /** 显式部署配置：仅不安装 AI 供应商 endpoint validator，远程 MCP 仍保持校验。 */
+  disableAiProviderEndpointValidation?: boolean;
   disableUserAuth?: boolean;
   /** 开发环境专用：使用已有的第一个活动账户进入工作台，不创建会话。 */
   devAuthBypass?: boolean;
@@ -1625,13 +1627,18 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     ...(options.liteLlmPriceCachePath ? { cachePath: options.liteLlmPriceCachePath } : {})
   });
   if (!options.liteLlmPriceCache && options.liteLlmPriceCachePath) liteLlmPriceCache.start();
+  const disableAiEndpointValidation = options.developmentServer === true || options.disableAiEndpointValidation === true;
+  const validateAiEndpoint = disableAiEndpointValidation || options.disableAiProviderEndpointValidation === true
+    ? undefined
+    : options.security ? (url: string) => assertSafeAiEndpoint(url, options.security?.allowPrivateAiEndpoints) : undefined;
+  const validateRemoteMcpEndpoint = disableAiEndpointValidation
+    ? undefined
+    : options.security ? (url: string) => assertSafeAiEndpoint(url, options.security?.allowPrivateAiEndpoints) : undefined;
   const ai = new AiManager(
     store,
     credentialVault,
     options.fetchImpl ?? fetch,
-    options.developmentServer === true || options.disableAiEndpointValidation === true
-      ? undefined
-      : options.security ? (url) => assertSafeAiEndpoint(url, options.security?.allowPrivateAiEndpoints) : undefined,
+    validateAiEndpoint,
     (task, actor) => {
       const requiredModules = analysisTaskReadModules(task.taskType, task.scope);
       const creator = actor ? null : database.get(
@@ -1654,6 +1661,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
       retrySleep: options.aiRetrySleep,
       aiChatImageMaxBytes: uploadLimits.chatImageBytes,
       liteLlmPriceCache,
+      remoteMcpValidateOutboundUrl: validateRemoteMcpEndpoint,
       allowPrivateAiEndpoints: options.security?.allowPrivateAiEndpoints === true
     }
   );
