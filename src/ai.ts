@@ -234,6 +234,7 @@ const interactiveStreamErrorCodes = new Set([
 ]);
 
 type InteractiveStreamWaitPhase = "first_event" | "between_events";
+type OutboundUrlValidator = (url: string) => Promise<readonly { address: string; family: 4 | 6 }[] | void>;
 
 type AiManagerOptions = {
   interactiveStreamIdleTimeoutMs?: number;
@@ -242,6 +243,7 @@ type AiManagerOptions = {
   retryPolicy?: Partial<AiRetryPolicy>;
   retrySleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
   allowPrivateAiEndpoints?: boolean;
+  remoteMcpValidateOutboundUrl?: OutboundUrlValidator;
 };
 
 function waitForAiRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -3347,13 +3349,13 @@ export class AiManager {
     private readonly store: Store,
     private readonly vault: CredentialVault,
     private readonly fetchImpl: typeof fetch = fetch,
-    private readonly validateOutboundUrl?: (url: string) => Promise<readonly { address: string; family: 4 | 6 }[] | void>,
+    private readonly validateOutboundUrl?: OutboundUrlValidator,
     private readonly authorizeTaskRun?: (task: Record<string, unknown>, actor?: TaskRunActor) => void,
     private readonly attachmentStorage?: AttachmentStorage,
     options: AiManagerOptions = {}
   ) {
     this.connectivityTestGate = new AiConnectivityTestGate(store.db);
-    this.remoteMcp = new RemoteMcpManager(store.db, vault, fetchImpl, validateOutboundUrl);
+    this.remoteMcp = new RemoteMcpManager(store.db, vault, fetchImpl, options.remoteMcpValidateOutboundUrl ?? validateOutboundUrl);
     this.allowPrivateAiEndpoints = options.allowPrivateAiEndpoints === true;
     this.interactiveStreamIdleTimeoutMs = Number.isSafeInteger(options.interactiveStreamIdleTimeoutMs)
       && Number(options.interactiveStreamIdleTimeoutMs) > 0

@@ -8,7 +8,7 @@ import { resolveAiRetryPolicy } from "./ai-retry.js";
 import { AI_STREAM_IDLE_TIMEOUT_SECONDS_ENV, resolveAiStreamIdleTimeoutMs } from "./ai-stream-timeout.js";
 import { DATABASE_SCHEMA_VERSION, readDatabaseSchemaVersion } from "./database.js";
 import { loadMasterSecret } from "./credential-vault.js";
-import { isDevelopmentAuthBypassEnabled, resolveRuntimeSecurity, warnIfPrivateAiEndpointsEnabled, type RuntimeSecurityOptions } from "./security.js";
+import { isDevelopmentAuthBypassEnabled, isPrivateAiEndpointsExplicitlyEnabled, resolveRuntimeSecurity, warnIfPrivateAiEndpointsEnabled, type RuntimeSecurityOptions } from "./security.js";
 import { logger, sanitizeError } from "./logger.js";
 import { resolveReleaseCheckIntervalMs, resolveReleaseCheckRetries, resolveReleaseCheckTimeoutMs } from "./release-update.js";
 import { resolveImageUploadLimits } from "./upload-limits.js";
@@ -230,6 +230,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Run
     recordStartupAttempt(options.dataDirectory, options.env);
     security = resolveRuntimeSecurity(options.env);
     warnIfPrivateAiEndpointsEnabled(options.env);
+    const disableAiProviderEndpointValidation = isPrivateAiEndpointsExplicitlyEnabled(options.env);
     createPreMigrationBackup(options, options.env);
     const devAuthBypass = isDevelopmentAuthBypassEnabled(options.env);
     if (devAuthBypass && !isLoopbackHost(options.host)) {
@@ -244,6 +245,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Run
       publicPath,
       security,
       disableAiEndpointValidation: options.disableAiEndpointValidation === true,
+      disableAiProviderEndpointValidation,
       disableUserAuth: devAuthBypass,
       devAuthBypass,
       developmentServer: isDevelopmentServer(options.env),

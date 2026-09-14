@@ -22,7 +22,7 @@ describe("AI 对话上下文 compact 界面", () => {
     expect(page).toContain('id="ai-context-warning"');
     expect(page).toContain('id="ai-context-meter" class="ai-context-meter is-empty" type="button"');
     expect(page).not.toContain("<b>—</b>");
-    expect(page).toContain("&feature=ai-context-meter-ring-only-v1");
+    expect(page).toContain("&feature=ai-context-meter-ring-only-v2");
     expect(page).toContain('id="ai-context-popover"');
     expect(page).toContain('id="ai-context-distribution"');
     expect(page).toContain('id="ai-context-compact"');
@@ -77,6 +77,8 @@ describe("AI 对话上下文 compact 界面", () => {
     expect(page).toContain("&feature=ai-context-cache-hit-v1");
     expect(application).toContain("setAiContextDistributionVisible");
     expect(styles).not.toContain(".ai-context-meter b");
+    expect(styles).toContain(".ai-context-meter::before { content: \"\"; position: absolute; top: 1px; left: 1px; width: 22px; height: 22px;");
+    expect(styles).toContain(".ai-context-meter::after { content: \"\"; position: absolute; inset: 3px;");
     expect(styles).toContain(".ai-context-popover::after { position: absolute; right: 67px;");
     expect(styles).toContain(".ai-context-popover.hidden { display: none; }");
     expect(styles).toContain(".ai-context-warning.hidden { display: none; }");
