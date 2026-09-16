@@ -404,8 +404,7 @@ describe("作品、导入和章节版本 API", () => {
     const counts = await request(runtime.app).get(`/api/chapters/${chapter.body.data.id}/annotation-counts`).expect(200);
     expect(counts.body.data).toEqual([
       { line: 1, count: 1 },
-      { line: 2, count: 2 },
-      { line: 3, count: 1 }
+      { line: 2, count: 1 }
     ]);
     expect(JSON.stringify(counts.body.data)).not.toContain("补充人物动机");
     const secondLine = await request(runtime.app).get(`/api/chapters/${chapter.body.data.id}/annotations?line=2`).expect(200);
@@ -417,10 +416,7 @@ describe("作品、导入和章节版本 API", () => {
     }).expect(200);
     expect(resolved.body.data).toMatchObject({ status: "resolved", versionNo: 2 });
     expect((await request(runtime.app).get(`/api/chapters/${chapter.body.data.id}/annotation-counts`).expect(200)).body.data)
-      .toEqual([
-        { line: 1, count: 1 },
-        { line: 2, count: 1 }
-      ]);
+      .toEqual([{ line: 1, count: 1 }]);
 
     const conflict = await request(runtime.app).patch(`/api/chapter-annotations/${created.body.data.id}`).send({
       note: "冲突修改",

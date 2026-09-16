@@ -54,7 +54,7 @@ import {
   renderWritePlanDetailMarkup,
   isInteractiveToolPending,
   aiFormatDateTime
-} from "/ai-interactive.js?v=20260906-question-recovery-v1";
+} from "/ai-interactive.js?v=20260915-plan-status-sync-v1";
 import { copyAiRawMarkdown } from "/ai-message-actions.js?v=20260713-copy-raw-markdown";
 import { bindPlainTextPaste } from "/plain-text-paste.js?v=20260815-plain-text-paste-v1";
 import { clipboardImageFiles } from "/character-markdown.js?v=20260820-ai-chat-image-attachments-v1";
@@ -3605,7 +3605,17 @@ async function loadAiApprovalCenterPlans() {
   ]);
   const plans = Array.isArray(planPayload) ? planPayload : (Array.isArray(planPayload?.plans) ? planPayload.plans : []);
   const questions = Array.isArray(questionPayload) ? questionPayload : (Array.isArray(questionPayload?.questions) ? questionPayload.questions : []);
+  plans.forEach(cacheAiWritePlanDetail);
   $("#ai-approval-list-host").innerHTML = renderApprovalCenterRows(plans, questions);
+  await syncVisibleAiWritePlanCardStatuses();
+}
+
+/** 审批中心的筛选结果不一定覆盖当前会话中的旧卡片，逐项读取其权威状态。 */
+async function syncVisibleAiWritePlanCardStatuses() {
+  const planIds = [...document.querySelectorAll("[data-ai-write-plan-id]")]
+    .map((card) => String(card.dataset.aiWritePlanId ?? ""))
+    .filter(Boolean);
+  await Promise.allSettled([...new Set(planIds)].map((planId) => fetchAiWritePlanDetail(planId)));
 }
 
 function openAiApprovalCenter() {
@@ -20366,7 +20376,13 @@ $("#platform-usage-pricing-refresh").addEventListener("click", async () => {
 });
 $("#user-management-button").addEventListener("click", openUsersDialog);
 $("#admin-ai-conversations-button").addEventListener("click", () => openAdminAiConversationsDialog().catch((error) => toast(error.message, "error")));
-$("#writing-progress-button").addEventListener("click", () => openWritingProgressDialog().catch((error) => toast(error.message, "error")));
+$("#writing-progress-button").addEventListener("click", () => {
+  void openWritingProgressDialog().catch((error) => toast(error.message, "error"));
+  if (isMobileViewport()) {
+    panelLayout.leftCollapsed = true;
+    applyPanelLayout(true);
+  }
+});
 $("#writing-progress-close").addEventListener("click", () => $("#writing-progress-dialog").close());
 $("#writing-progress-refresh").addEventListener("click", () => loadWritingProgress().catch((error) => toast(error.message, "error")));
 $("#writing-goal-form").addEventListener("submit", saveWritingGoal);

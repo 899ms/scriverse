@@ -4027,20 +4027,12 @@ export class Store {
         ? { sql: ` AND annotation.kind IN (${kinds.map(() => "?").join(",")})`, params: [...kinds] }
         : { sql: " AND 1 = 0", params: [] as string[] };
     return this.db.all<{ line: number; count: number }>(
-      `WITH RECURSIVE annotation_lines(line, end_line) AS (
-         SELECT annotation.start_line, annotation.end_line
-         FROM chapter_annotations annotation
-         WHERE annotation.chapter_id = ? AND annotation.deleted_at IS NULL
-           AND NOT (annotation.kind = 'todo' AND annotation.status = 'resolved')${kindFilter.sql}
-         UNION ALL
-         SELECT line + 1, end_line
-         FROM annotation_lines
-         WHERE line < end_line
-       )
-       SELECT line, COUNT(*) AS count
-       FROM annotation_lines
-       GROUP BY line
-       ORDER BY line`,
+      `SELECT annotation.start_line AS line, COUNT(*) AS count
+       FROM chapter_annotations annotation
+       WHERE annotation.chapter_id = ? AND annotation.deleted_at IS NULL
+         AND NOT (annotation.kind = 'todo' AND annotation.status = 'resolved')${kindFilter.sql}
+       GROUP BY annotation.start_line
+       ORDER BY annotation.start_line`,
       chapterId,
       ...kindFilter.params
     ).map((row) => ({ line: Number(row.line), count: Number(row.count) }));
