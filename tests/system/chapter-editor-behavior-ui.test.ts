@@ -13,6 +13,7 @@ describe("正文编辑器输入行为界面", () => {
     expect(page).toContain("feature=chapter-auto-indent-v1");
     expect(page).toContain("feature=chapter-centered-scroll-v1");
     expect(page).toContain("feature=chapter-center-bottom-space-v1");
+    expect(page).toContain("feature=chapter-line-scroll-bind-v1");
     expect(application).toContain('event.key !== "Enter"');
     expect(application).toContain("!state.work?.editorAutoIndentEnabled");
     expect(application).toContain("scheduleChapterCaretScroll()");
