@@ -22,6 +22,13 @@ import { calculateLineNumberTextOffset, calculateLineNumberTop } from "/line-num
 import { buildChapterLineMirror, findChapterLineWindow } from "/chapter-editor-virtualization.js?v=20260810-visible-lines-v1";
 import { CHAPTER_PARAGRAPH_INDENT, calculateChapterCaretScroll, chapterLineIndexAtOffset, insertIndentedParagraph } from "/chapter-editor-behavior.js?v=20260828-centered-scroll-v1";
 import {
+  calculateChapterEditorContentHeight,
+  chapterLineNumberLayerTransform,
+  needsChapterLineVirtualWindowRefresh,
+  readChapterEditorScrollMetrics,
+  transferNestedEditorScroll
+} from "/chapter-editor-scroll.js?v=20260916-line-scroll-bind-v1";
+import {
   FORESHADOW_REMINDER_SNOOZE_STORAGE_KEY,
   foreshadowReminderRequestTargetsState,
   foreshadowReminderSnoozeKey,
@@ -1739,24 +1746,27 @@ function setModuleNavExpanded(expanded) {
   $("#module-nav").querySelectorAll(".module-nav-secondary").forEach((button) => button.classList.toggle("hidden", !expanded));
 }
 
+function getChapterEditorScroller() {
+  // 行号与正文只允许这个容器滚动。
+  return $("#chapter-editor-scroll");
+}
+
 function syncChapterLineNumberScroll() {
+  const scroller = getChapterEditorScroller();
   const input = $("#chapter-content");
   const inner = $("#chapter-line-numbers-inner");
   const whitespace = $("#chapter-whitespace-inner");
-  if (!input || !inner) return;
-  inner.style.transform = `translateY(${-input.scrollTop}px)`;
-  inner.dataset.scrollTop = String(input.scrollTop);
+  if (!scroller || !inner) return;
+  if (input) transferNestedEditorScroll(input, scroller);
+  const metrics = readChapterEditorScrollMetrics(scroller);
+  const layerTransform = chapterLineNumberLayerTransform();
+  inner.style.transform = layerTransform;
+  inner.dataset.scrollTop = String(metrics.scrollTop);
   if (whitespace) {
-    whitespace.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
-    whitespace.dataset.scrollTop = String(input.scrollTop);
+    whitespace.style.transform = layerTransform;
+    whitespace.dataset.scrollTop = String(metrics.scrollTop);
   }
-  if (!chapterLineVirtualWindow) return;
-  const buffer = input.clientHeight * 0.35;
-  const viewportBottom = input.scrollTop + input.clientHeight;
-  const needsPreviousLines = chapterLineVirtualWindow.start > 0 && input.scrollTop < chapterLineVirtualWindow.top + buffer;
-  const needsNextLines = chapterLineVirtualWindow.end < chapterLineVirtualWindow.lineCount
-    && viewportBottom > chapterLineVirtualWindow.bottom - buffer;
-  if (needsPreviousLines || needsNextLines) scheduleChapterLineNumbers();
+  if (needsChapterLineVirtualWindowRefresh(chapterLineVirtualWindow, metrics)) scheduleChapterLineNumbers();
 }
 
 function syncChapterWhitespaceControls() {
@@ -1908,7 +1918,8 @@ function renderChapterLineNumbers({ targetLineIndex = null } = {}) {
   const input = $("#chapter-content");
   const inner = $("#chapter-line-numbers-inner");
   const measure = $("#chapter-line-measure");
-  if (!input || !inner || !measure || input.clientWidth === 0) return;
+  const scroller = getChapterEditorScroller();
+  if (!input || !inner || !measure || !scroller || input.clientWidth === 0) return;
   const style = getComputedStyle(input);
   const contentWidth = Math.max(1, input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
   const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.55;
@@ -1919,20 +1930,31 @@ function renderChapterLineNumbers({ targetLineIndex = null } = {}) {
   const numberTextOffset = calculateLineNumberTextOffset(lineHeight, numberLineHeight);
   const layout = prepareChapterLineLayout(input, measure, style, contentWidth);
   const paddingBottom = parseFloat(style.paddingBottom) || 0;
-  const scrollContentHeight = input.scrollHeight - paddingTop - paddingBottom;
-  const targetHeight = input.scrollHeight > input.clientHeight + 1 ? scrollContentHeight : null;
-  const { getLineBounds, measureHeight } = createChapterLineBoundsGetter(layout, measure, lineHeight, targetHeight);
+  const { getLineBounds, measureHeight } = createChapterLineBoundsGetter(layout, measure, lineHeight);
+  const nextHeight = calculateChapterEditorContentHeight({
+    measureHeight,
+    paddingTop,
+    paddingBottom,
+    viewportHeight: scroller.clientHeight
+  });
+  const nextHeightPx = `${nextHeight}px`;
+  if (input.style.height !== nextHeightPx) {
+    const savedScrollTop = scroller.scrollTop;
+    input.style.height = nextHeightPx;
+    scroller.scrollTop = savedScrollTop;
+  }
+  const metrics = readChapterEditorScrollMetrics(scroller);
   if (Number.isInteger(targetLineIndex)) {
     const safeTarget = Math.max(0, Math.min(targetLineIndex, layout.lines.length - 1));
-    input.scrollTop = Math.max(0, getLineBounds(safeTarget).top + paddingTop - input.clientHeight / 3);
+    scroller.scrollTop = Math.max(0, getLineBounds(safeTarget).top + paddingTop - metrics.clientHeight / 3);
   }
-  const viewportTop = Math.max(0, input.scrollTop - paddingTop);
-  const overscan = Math.max(input.clientHeight, lineHeight * 8);
+  const viewportTop = Math.max(0, scroller.scrollTop - paddingTop);
+  const overscan = Math.max(metrics.clientHeight, lineHeight * 8);
   const lineWindow = findChapterLineWindow(
     layout.lines.length,
     getLineBounds,
     viewportTop - overscan,
-    viewportTop + input.clientHeight + overscan
+    viewportTop + metrics.clientHeight + overscan
   );
   const numbers = document.createDocumentFragment();
   for (let index = lineWindow.start; index < lineWindow.end; index += 1) {
@@ -2018,26 +2040,25 @@ function scheduleChapterCaretScroll() {
     chapterCaretScrollFrame = null;
     const input = $("#chapter-content");
     const measure = $("#chapter-line-measure");
-    if (!state.work?.editorTypewriterModeEnabled || document.activeElement !== input || input.readOnly || input.clientWidth === 0 || input.clientHeight === 0) return;
+    const scroller = getChapterEditorScroller();
+    if (!state.work?.editorTypewriterModeEnabled || document.activeElement !== input || !scroller || input.readOnly || input.clientWidth === 0 || scroller.clientHeight === 0) return;
     const style = getComputedStyle(input);
     const paddingTop = parseFloat(style.paddingTop) || 0;
-    const paddingBottom = parseFloat(style.paddingBottom) || 0;
     const contentWidth = Math.max(1, input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
     const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.55;
     const layout = prepareChapterLineLayout(input, measure, style, contentWidth);
-    const scrollContentHeight = input.scrollHeight - paddingTop - paddingBottom;
-    const targetHeight = input.scrollHeight > input.clientHeight + 1 ? scrollContentHeight : null;
-    const { getLineBounds } = createChapterLineBoundsGetter(layout, measure, lineHeight, targetHeight);
+    const { getLineBounds } = createChapterLineBoundsGetter(layout, measure, lineHeight);
     const lineIndex = Math.min(layout.lines.length - 1, chapterLineIndexAtOffset(input.value, input.selectionEnd));
     const caretBottom = getLineBounds(lineIndex).bottom + paddingTop;
+    const metrics = readChapterEditorScrollMetrics(scroller);
     const nextScrollTop = calculateChapterCaretScroll({
       caretBottom,
-      scrollTop: input.scrollTop,
-      clientHeight: input.clientHeight,
-      scrollHeight: input.scrollHeight
+      scrollTop: metrics.scrollTop,
+      clientHeight: metrics.clientHeight,
+      scrollHeight: metrics.scrollHeight
     });
-    if (nextScrollTop === input.scrollTop) return;
-    input.scrollTop = nextScrollTop;
+    if (nextScrollTop === metrics.scrollTop) return;
+    scroller.scrollTop = nextScrollTop;
     syncChapterLineNumberScroll();
     scheduleChapterLineNumbers();
   });
@@ -20765,6 +20786,7 @@ $("#chapter-content").addEventListener("input", (event) => {
 });
 $("#chapter-content").addEventListener("select", () => setAiContextMeter(null));
 $("#chapter-content").addEventListener("scroll", syncChapterLineNumberScroll);
+$("#chapter-editor-scroll").addEventListener("scroll", syncChapterLineNumberScroll, { passive: true });
 $("#chapter-content").addEventListener("contextmenu", (event) => {
   if (!state.chapter) return;
   showLineCitationMenu(event, lineIndexAtPointer(event.clientY));
@@ -20856,7 +20878,7 @@ $("#ai-semantic-query").addEventListener("keydown", (event) => {
 $("#ai-semantic-inject").addEventListener("click", () => { void injectAiSemanticSelection(); });
 setupPanelResize($("#left-panel-resize"), "left");
 setupPanelResize($("#ai-panel-resize"), "ai");
-if (typeof ResizeObserver !== "undefined") new ResizeObserver(scheduleChapterLineNumbers).observe($("#chapter-content"));
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(scheduleChapterLineNumbers).observe($("#chapter-editor-scroll"));
 if (typeof ResizeObserver !== "undefined") new ResizeObserver(syncMobileAiPanelSafeTop).observe($("#chapter-foreshadow-reminder"));
 window.addEventListener("resize", () => {
   if (isMobileViewport() && $("#onboarding-dialog").open) completeOnboarding();
