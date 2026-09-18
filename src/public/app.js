@@ -509,6 +509,7 @@ function applyWorkAccessMode() {
   $("#module-nav [data-module=\"comments\"]").classList.toggle("permission-hidden", Boolean(state.work) && !canReadModule("comments"));
   $("#module-nav [data-work-settings]").classList.toggle("permission-hidden", Boolean(state.work) && !canManageWork());
   $("#reader-open-button").classList.toggle("permission-hidden", proseHidden);
+  $("#writing-progress-button").classList.toggle("permission-hidden", Boolean(state.work) && !canReadModule("editor"));
   $("#ai-assistant-entry").classList.toggle("permission-hidden", !state.work || aiHidden);
   $("#new-volume-button").classList.toggle("permission-hidden", Boolean(state.work) && proseReadOnly);
   $("#chapter-batch-button").classList.toggle("permission-hidden", Boolean(state.work) && proseReadOnly);

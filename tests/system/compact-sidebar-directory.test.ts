@@ -44,6 +44,7 @@ describe("窄侧栏作品目录", () => {
     expect(styles.text).toContain('@container left-panel-body (max-width: 220px)');
     expect(styles.text).toContain('.chapter-count-unit, .volume-chapter-count-unit { display: none; }');
     expect(styles.text).toContain('.module-nav > #ai-assistant-entry');
+    expect(styles.text).toContain('.module-nav > #writing-progress-button');
     expect(styles.text).toContain('grid-template-columns: auto minmax(0, 2em);');
     expect(styles.text).toContain('justify-content: start;');
     expect(styles.text).toContain('.module-nav > button[data-module="outlines"]');

@@ -1473,7 +1473,8 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
   .module-nav > #reader-open-button,
   .module-nav > button[data-module="comments"],
   .module-nav > button[data-module="outlines"],
-  .module-nav > button[data-work-settings] {
+  .module-nav > button[data-work-settings],
+  .module-nav > #writing-progress-button {
     display: grid;
     grid-template-columns: auto minmax(0, 2em);
     align-items: start;
