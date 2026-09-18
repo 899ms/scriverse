@@ -73,11 +73,18 @@ docker compose ps
 
 访问 [http://127.0.0.1:13210](http://127.0.0.1:13210)，输入初始化令牌并创建首个管理员账户。
 
-首个管理员创建完成后，将 `.env` 中的注册开关改为：
+首个管理员创建完成后，将 `.env` 中的注册开关改为彻底禁止，或改为邀请码注册：
 
 ```dotenv
 APP_ALLOW_REGISTRATION=false
 APP_SETUP_TOKEN=
+```
+
+需要邀请码时：
+
+```dotenv
+APP_ALLOW_REGISTRATION=invite
+APP_SETUP_TOKEN=请保留至少32个字符的初始化令牌
 ```
 
 重新创建容器，让配置立即生效：
@@ -86,7 +93,7 @@ APP_SETUP_TOKEN=
 docker compose up -d --force-recreate
 ```
 
-`APP_ALLOW_REGISTRATION` 只有明确设置为 `true` 或 `1` 时才开放注册；`false` 或 `0` 表示关闭，同时必须配置至少 32 个字符的 `APP_SETUP_TOKEN`。未设置或其他值都会同时关闭前端注册入口和后端注册接口，包括空数据库的首位管理员注册。初始化令牌只在创建首位管理员时校验。
+`APP_ALLOW_REGISTRATION` 是三个互斥等级：未设置、`false`、`0` 或其他值表示彻底禁止注册；`invite` 表示需要系统管理员生成的一次性邀请码；`true` 或 `1` 表示完全开放。`invite` 与完全开放时都必须配置至少 32 个字符的 `APP_SETUP_TOKEN`。未设置或其他值都会同时关闭前端注册入口和后端注册接口，包括空数据库的首位管理员注册。初始化令牌只在创建首位管理员时校验；邀请码只在已有用户后的普通注册时核销。
 
 `SCRIVERSE_PRE_MIGRATION_BACKUP_RETENTION` 控制启动迁移前的完整数据库备份保留数量，默认保留 5 个版本，最少保留 2 个版本。每次启动时会清理超出数量的最旧完整备份，再为本次迁移保留一个备份位置，避免迁移失败后的重启循环持续占满磁盘。
 
@@ -232,7 +239,7 @@ docker build --tag scriverse:local .
 
 ### 页面显示“注册已禁用”
 
-首次初始化时必须设置 `APP_ALLOW_REGISTRATION=true` 和至少 32 个字符的 `APP_SETUP_TOKEN`，然后重新创建容器。创建管理员后应立即关闭注册并清空初始化令牌。
+首次初始化时必须设置 `APP_ALLOW_REGISTRATION=true` 或 `invite`，以及至少 32 个字符的 `APP_SETUP_TOKEN`，然后重新创建容器。创建管理员后可将开关改为 `false` 彻底关闭，或改为 `invite` 仅允许一次性邀请码注册。邀请码由系统管理员在用户管理中生成，每个只能使用一次。
 
 ### 容器不断重启
 
