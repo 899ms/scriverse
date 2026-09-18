@@ -16,6 +16,9 @@ export type BasicAuthOptions = {
   failureWindowMs?: number;
 };
 
+export const REGISTRATION_MODES = ["disabled", "invite", "open"] as const;
+export type RegistrationMode = (typeof REGISTRATION_MODES)[number];
+
 export type RuntimeSecurityOptions = {
   auth?: BasicAuthOptions;
   trustProxy?: boolean | number;
@@ -23,9 +26,30 @@ export type RuntimeSecurityOptions = {
   apiRateWindowMs?: number;
   enforceSameOrigin?: boolean;
   allowPrivateAiEndpoints?: boolean;
+  /** 三级注册策略；未指定时由 allowRegistration 兼容为 open 或 disabled。 */
+  registrationMode?: RegistrationMode;
+  /** 兼容字段：true 表示完全开放注册，false 表示彻底禁止。invite 模式请使用 registrationMode。 */
   allowRegistration?: boolean;
   setupToken?: string;
 };
+
+/** 解析 APP_ALLOW_REGISTRATION：true/1 开放，invite 需邀请码，其余值均禁止。 */
+export function parseRegistrationMode(value: string | undefined): RegistrationMode {
+  if (value === "true" || value === "1") return "open";
+  if (value === "invite") return "invite";
+  return "disabled";
+}
+
+export function resolveRegistrationMode(
+  security?: Pick<RuntimeSecurityOptions, "registrationMode" | "allowRegistration">
+): RegistrationMode {
+  if (security?.registrationMode) return security.registrationMode;
+  return security?.allowRegistration === true ? "open" : "disabled";
+}
+
+export function isRegistrationEnabled(mode: RegistrationMode): boolean {
+  return mode !== "disabled";
+}
 
 export const PRIVATE_AI_ENDPOINTS_ENV = "APP_ALLOW_PRIVATE_AI_ENDPOINTS";
 
@@ -214,7 +238,7 @@ export function createAuthenticationRateLimitMiddleware(limit = 10, windowMs = 1
   return (request, response, next) => {
     const path = normalizeApiPath(request.path);
     const authenticationWrite = request.method === "POST"
-      && ["/api/auth/login", "/api/auth/register", "/api/desktop/auth/login"].includes(path);
+      && ["/api/auth/login", "/api/auth/register", "/api/desktop/auth/login", "/api/desktop/auth/register"].includes(path);
     if (!authenticationWrite) return next();
     const rate = consumeRate(entries, `${requestKey(request)}:${path}`, limit, windowMs);
     if (rate.allowed) return next();
@@ -548,14 +572,16 @@ export function resolveRuntimeSecurity(environment: NodeJS.ProcessEnv, requireAu
   const trustProxyValue = environment.APP_TRUST_PROXY?.trim() ?? "";
   const trustProxy = trustProxyValue === "true" ? true : /^\d+$/u.test(trustProxyValue) ? Number(trustProxyValue) : false;
   if (typeof trustProxy === "number" && (trustProxy < 0 || trustProxy > 10)) throw new Error("APP_TRUST_PROXY 只能是 true 或 0-10 的整数");
-  const allowRegistration = parseBooleanEnvironmentValue(environment.APP_ALLOW_REGISTRATION) ?? false;
+  const registrationMode = parseRegistrationMode(environment.APP_ALLOW_REGISTRATION);
+  const allowRegistration = isRegistrationEnabled(registrationMode);
   const setupToken = environment.APP_SETUP_TOKEN ?? "";
-  if (allowRegistration && setupToken.length < 32) throw new Error("开放注册时 APP_SETUP_TOKEN 至少需要 32 个字符");
+  if (allowRegistration && setupToken.length < 32) throw new Error("开放或邀请码注册时 APP_SETUP_TOKEN 至少需要 32 个字符");
   return {
     ...(username ? { auth: { username, password } } : {}),
     trustProxy,
     enforceSameOrigin: true,
     allowPrivateAiEndpoints: parseBooleanEnvironmentValue(environment[PRIVATE_AI_ENDPOINTS_ENV]) ?? !production,
+    registrationMode,
     allowRegistration,
     ...(setupToken ? { setupToken } : {})
   };

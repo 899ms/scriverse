@@ -80,6 +80,39 @@ export type AuthApiKey = {
   prefix: string;
 };
 
+export type RegistrationInviteSummary = {
+  id: string;
+  createdAt: string;
+  createdBy: { userId: string; username: string; displayName: string };
+  usedAt: string | null;
+  usedBy: { userId: string; username: string; displayName: string } | null;
+};
+
+export type CreatedRegistrationInvite = RegistrationInviteSummary & { code: string };
+
+const INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const INVITE_CODE_LENGTH = 16;
+export const MAX_UNUSED_REGISTRATION_INVITES = 50;
+
+export function normalizeRegistrationInviteCode(value: string): string {
+  return value.normalize("NFKC").replace(/[\s-]/gu, "").toLocaleUpperCase("en-US");
+}
+
+export function formatRegistrationInviteCode(normalized: string): string {
+  return normalized.match(/.{1,4}/gu)?.join("-") ?? normalized;
+}
+
+function generateRegistrationInviteCode(): string {
+  const bytes = randomBytes(INVITE_CODE_LENGTH);
+  let code = "";
+  for (const byte of bytes) code += INVITE_CODE_ALPHABET[byte % INVITE_CODE_ALPHABET.length];
+  return code;
+}
+
+export function isNormalizedRegistrationInviteCode(value: string): boolean {
+  return value.length === INVITE_CODE_LENGTH && [...value].every((character) => INVITE_CODE_ALPHABET.includes(character));
+}
+
 export type WorkAccessRole = "admin" | PublicWorkAccessRole;
 export type AssignableWorkMemberRole = "editor" | "settings-editor" | "viewer";
 export type WorkMemberPermissionInput = { role: AssignableWorkMemberRole } | { permissions: WorkModulePermissions };
@@ -389,54 +422,173 @@ export class UserAuthService {
     };
   }
 
-  register(input: { username: string; password: string }): { token: string; session: AuthSession } {
+  register(input: { username: string; password: string; inviteCode?: string }): { token: string; session: AuthSession; inviteId: string | null } {
+    return this.database.transaction(() => {
+      const userId = this.insertRegisteredUser(input);
+      const inviteId = input.inviteCode ? this.consumeRegistrationInvite(input.inviteCode, userId) : null;
+      return { ...this.createSession(userId), inviteId };
+    });
+  }
+
+  registerDesktop(input: {
+    username: string;
+    password: string;
+    inviteCode?: string;
+    desktopId: string;
+    profileId: string;
+    clientVersion: string;
+  }): { token: string; session: AuthDesktopSession; inviteId: string | null } {
+    return this.database.transaction(() => {
+      const userId = this.insertRegisteredUser(input);
+      const inviteId = input.inviteCode ? this.consumeRegistrationInvite(input.inviteCode, userId) : null;
+      return { ...this.createDesktopSession(userId, input), inviteId };
+    });
+  }
+
+  createRegistrationInvite(actor: AuthUser): CreatedRegistrationInvite {
+    if (actor.role !== "admin") throw new AppError(403, "ADMIN_REQUIRED", "该操作仅限系统管理员");
+    return this.database.transaction(() => {
+      const unused = Number(this.database.get(
+        "SELECT COUNT(*) AS count FROM registration_invites WHERE used_at IS NULL"
+      )?.count ?? 0);
+      if (unused >= MAX_UNUSED_REGISTRATION_INVITES) {
+        throw new AppError(409, "INVITE_CODE_LIMIT", `未使用的邀请码不能超过 ${MAX_UNUSED_REGISTRATION_INVITES} 个`);
+      }
+      const timestamp = new Date().toISOString();
+      const inviteId = randomUUID();
+      let code = "";
+      let inserted = false;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        code = generateRegistrationInviteCode();
+        try {
+          this.database.run(
+            `INSERT INTO registration_invites (id, code_hash, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?)`,
+            inviteId,
+            sha256(code),
+            actor.userId,
+            timestamp
+          );
+          inserted = true;
+          break;
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("UNIQUE constraint failed")) throw error;
+        }
+      }
+      if (!inserted) throw new AppError(500, "INVITE_CODE_GENERATE_FAILED", "生成邀请码失败，请重试");
+      return {
+        id: inviteId,
+        code: formatRegistrationInviteCode(code),
+        createdAt: timestamp,
+        createdBy: { userId: actor.userId, username: actor.username, displayName: actor.displayName },
+        usedAt: null,
+        usedBy: null
+      };
+    });
+  }
+
+  listRegistrationInvites(): RegistrationInviteSummary[] {
+    return this.database.all<{
+      id: string;
+      created_at: string;
+      created_by_user_id: string;
+      created_by_username: string;
+      created_by_display_name: string;
+      used_at: string | null;
+      used_by_user_id: string | null;
+      used_by_username: string | null;
+      used_by_display_name: string | null;
+    }>(
+      `SELECT invite.id, invite.created_at, invite.created_by_user_id, invite.used_at, invite.used_by_user_id,
+              creator.username AS created_by_username, creator.display_name AS created_by_display_name,
+              consumer.username AS used_by_username, consumer.display_name AS used_by_display_name
+       FROM registration_invites invite
+       JOIN users creator ON creator.id = invite.created_by_user_id
+       LEFT JOIN users consumer ON consumer.id = invite.used_by_user_id
+       ORDER BY invite.created_at DESC, invite.id
+       LIMIT 100`
+    ).map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      createdBy: {
+        userId: row.created_by_user_id,
+        username: row.created_by_username,
+        displayName: row.created_by_display_name
+      },
+      usedAt: row.used_at,
+      usedBy: row.used_by_user_id && row.used_by_username && row.used_by_display_name
+        ? { userId: row.used_by_user_id, username: row.used_by_username, displayName: row.used_by_display_name }
+        : null
+    }));
+  }
+
+  private insertRegisteredUser(input: { username: string; password: string }): string {
     const normalizedUsername = normalizeUsername(input.username);
     const timestamp = new Date().toISOString();
     const userId = randomUUID();
     const salt = randomBytes(16).toString("base64url");
-    return this.database.transaction(() => {
-      const role = Number(this.database.get("SELECT COUNT(*) AS count FROM users WHERE id <> ?", SYSTEM_USER_ID)?.count ?? 0) === 0 ? "admin" : "user";
+    const role = Number(this.database.get("SELECT COUNT(*) AS count FROM users WHERE id <> ?", SYSTEM_USER_ID)?.count ?? 0) === 0 ? "admin" : "user";
+    this.database.run(
+      `INSERT INTO users (id, username, normalized_username, display_name, password_hash, password_salt, role, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+      userId,
+      input.username.trim(),
+      normalizedUsername,
+      input.username.trim(),
+      passwordDigest(input.password, salt),
+      salt,
+      role,
+      timestamp,
+      timestamp
+    );
+    this.database.run("DELETE FROM login_attempts WHERE normalized_username = ?", normalizedUsername);
+    if (role === "admin") {
       this.database.run(
-        `INSERT INTO users (id, username, normalized_username, display_name, password_hash, password_salt, role, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        "UPDATE works SET owner_user_id = ? WHERE (owner_user_id IS NULL OR owner_user_id = ?) AND id <> ?",
         userId,
-        input.username.trim(),
-        normalizedUsername,
-        input.username.trim(),
-        passwordDigest(input.password, salt),
-        salt,
-        role,
-        timestamp,
-        timestamp
+        SYSTEM_USER_ID,
+        PLATFORM_AI_WORK_ID
       );
-      this.database.run("DELETE FROM login_attempts WHERE normalized_username = ?", normalizedUsername);
-      if (role === "admin") {
-        this.database.run(
-          "UPDATE works SET owner_user_id = ? WHERE (owner_user_id IS NULL OR owner_user_id = ?) AND id <> ?",
-          userId,
-          SYSTEM_USER_ID,
-          PLATFORM_AI_WORK_ID
-        );
-        this.database.run(
-          `UPDATE ai_conversations SET created_by_user_id = ?
-           WHERE created_by_user_id IS NULL
-             AND work_id IN (SELECT id FROM works WHERE owner_user_id = ? AND id <> ?)`,
-          userId,
-          userId,
-          PLATFORM_AI_WORK_ID
-        );
-        this.database.run(
-          `INSERT OR IGNORE INTO work_memberships (work_id, user_id, role, invited_by_user_id, created_at)
-           SELECT id, ?, 'owner', ?, ? FROM works WHERE owner_user_id = ? AND id <> ?`,
-          userId,
-          userId,
-          timestamp,
-          userId,
-          PLATFORM_AI_WORK_ID
-        );
-      }
-      return this.createSession(userId);
-    });
+      this.database.run(
+        `UPDATE ai_conversations SET created_by_user_id = ?
+         WHERE created_by_user_id IS NULL
+           AND work_id IN (SELECT id FROM works WHERE owner_user_id = ? AND id <> ?)`,
+        userId,
+        userId,
+        PLATFORM_AI_WORK_ID
+      );
+      this.database.run(
+        `INSERT OR IGNORE INTO work_memberships (work_id, user_id, role, invited_by_user_id, created_at)
+         SELECT id, ?, 'owner', ?, ? FROM works WHERE owner_user_id = ? AND id <> ?`,
+        userId,
+        userId,
+        timestamp,
+        userId,
+        PLATFORM_AI_WORK_ID
+      );
+    }
+    return userId;
+  }
+
+  private consumeRegistrationInvite(inviteCode: string, userId: string): string {
+    const normalized = normalizeRegistrationInviteCode(inviteCode);
+    if (!isNormalizedRegistrationInviteCode(normalized)) {
+      throw new AppError(403, "INVITE_CODE_INVALID", "邀请码无效或已被使用");
+    }
+    const timestamp = new Date().toISOString();
+    const row = this.database.get<{ id: string }>(
+      "SELECT id FROM registration_invites WHERE code_hash = ? AND used_at IS NULL",
+      sha256(normalized)
+    );
+    if (!row) throw new AppError(403, "INVITE_CODE_INVALID", "邀请码无效或已被使用");
+    const result = this.database.run(
+      "UPDATE registration_invites SET used_at = ?, used_by_user_id = ? WHERE id = ? AND used_at IS NULL",
+      timestamp,
+      userId,
+      row.id
+    );
+    if (result.changes !== 1) throw new AppError(403, "INVITE_CODE_INVALID", "邀请码无效或已被使用");
+    return row.id;
   }
 
   private validateLoginCredentials(username: string, password: string): {
@@ -1044,6 +1196,7 @@ export function createUserSessionMiddleware(
       || (path === "/api/auth/register" && request.method === "POST")
       || (path === "/api/auth/login" && request.method === "POST")
       || (path === "/api/desktop/auth/login" && request.method === "POST")
+      || (path === "/api/desktop/auth/register" && request.method === "POST")
       || !path.startsWith("/api/");
     if (!session && !desktopSession && !apiKey && !isPublic) {
       logger.warn("auth.request.rejected", { reason: "authentication_required", method: request.method, path: sanitizeRequestPath(request.path) });
@@ -1425,6 +1578,10 @@ export function createWorkAuthorizationMiddleware(auth: UserAuthService, disable
       return next();
     }
     if (path.startsWith("/api/users") && !path.startsWith("/api/users/directory")) {
+      if (user.role !== "admin") throw new AppError(403, "ADMIN_REQUIRED", "该操作仅限系统管理员");
+      return next();
+    }
+    if (path.startsWith("/api/registration-invites")) {
       if (user.role !== "admin") throw new AppError(403, "ADMIN_REQUIRED", "该操作仅限系统管理员");
       return next();
     }
