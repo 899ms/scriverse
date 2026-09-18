@@ -885,6 +885,43 @@ button.usage-calendar-cell:hover, button.usage-calendar-cell:focus-visible { pos
   cursor: not-allowed;
   opacity: .46;
 }
+.invite-codes-panel {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+}
+.invite-codes-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.invite-codes-heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+.invite-codes-heading .primary-button {
+  min-height: 36px;
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+.invite-code-latest {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--ink);
+  font-family: var(--font-latin), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.invite-code-latest strong { font-weight: 700; letter-spacing: .06em; }
+.invite-code-row { grid-template-columns: minmax(0, 1fr) auto; }
+.invite-code-row > span { font-family: var(--font-latin), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .dialog.admin-ai-conversations-dialog { width: min(1040px, 94vw); height: min(760px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); overflow: hidden; }
 .admin-ai-conversations-dialog { grid-template-rows: auto minmax(0, 1fr) auto; }
 .admin-ai-conversations-dialog[open] { display: grid; }
@@ -4212,6 +4249,7 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
   .member-permission-form .primary-button { justify-self: stretch; }
   .access-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
   .access-row select, .access-row button { width: 100%; }
+  .invite-codes-heading { align-items: stretch; flex-direction: column; }
   .admin-ai-conversations-dialog .dialog-header { gap: 10px; }
   .admin-ai-conversations-dialog .dialog-header > div:first-child { min-width: 0; }
   .admin-ai-conversations-dialog .dialog-header-meta { display: none; }

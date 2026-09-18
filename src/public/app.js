@@ -209,6 +209,7 @@ function isSelectableModel(model) {
 const state = {
   user: null,
   csrfToken: null,
+  registrationMode: "disabled",
   works: [],
   work: null,
   chapter: null,
@@ -6546,7 +6547,7 @@ function invalidateAuthentication() {
   showAuth(false);
 }
 
-function showAuth(setupRequired, registrationOpen = false, setupTokenRequired = false) {
+function showAuth(setupRequired, registrationOpen = false, setupTokenRequired = false, registrationMode = "disabled") {
   if (state.user) return;
   document.documentElement.classList.remove("dev-auth-bypass");
   document.documentElement.classList.add("login-route");
@@ -6555,14 +6556,17 @@ function showAuth(setupRequired, registrationOpen = false, setupTokenRequired = 
   document.body.classList.add("auth-pending");
   $("#auth-view").classList.remove("hidden");
   const canRegister = registrationOpen === true;
+  const inviteRequired = registrationMode === "invite" && setupRequired !== true;
   $("#auth-title").textContent = setupRequired
     ? canRegister ? "创建首个管理员账户" : "注册已禁用"
     : "登录后继续创作";
   $("#auth-description").textContent = setupRequired
     ? canRegister
       ? "这是首次启动。首个注册用户会成为系统管理员，并接管现有作品。"
-      : "请将 APP_ALLOW_REGISTRATION 设置为 true 后创建首个管理员账户。"
-    : "你的作品、协作权限和每一次修改都会绑定到账户。";
+      : "请将 APP_ALLOW_REGISTRATION 设置为 true 或 invite 后创建首个管理员账户。"
+    : inviteRequired
+      ? "当前部署需要邀请码才能注册。请向系统管理员获取一次性邀请码。"
+      : "你的作品、协作权限和每一次修改都会绑定到账户。";
   const registerTab = $("#auth-register-tab");
   registerTab.disabled = !canRegister;
   registerTab.setAttribute("aria-disabled", String(!canRegister));
@@ -6571,12 +6575,19 @@ function showAuth(setupRequired, registrationOpen = false, setupTokenRequired = 
   const setupTokenInput = setupTokenField.querySelector('input[name="setupToken"]');
   setupTokenField.classList.toggle("hidden", !setupTokenRequired);
   setupTokenInput.required = setupTokenRequired;
+  const inviteField = $("#register-invite-code-field");
+  const inviteInput = inviteField.querySelector('input[name="inviteCode"]');
+  inviteField.classList.toggle("hidden", !inviteRequired);
+  inviteInput.required = inviteRequired;
   selectAuthMode(setupRequired && canRegister ? "register" : "login");
 }
 
 function applyAuthenticatedUser(session) {
   state.user = session.user;
   state.csrfToken = session.csrfToken;
+  state.registrationMode = session.registrationMode === "invite" || session.registrationMode === "open"
+    ? session.registrationMode
+    : "disabled";
   const isSystemAdmin = session.user.isSystemAdmin === true;
   const accountButton = $("#account-button");
   $("#account-name").textContent = session.user.displayName;
@@ -6659,7 +6670,7 @@ async function initializeAuthentication() {
   if (!session.authenticated) {
     // 未登录时一律转到登录页路由；登录页本身则保持原样
     if (route.view !== "login") window.history.replaceState(null, "", serializePageRoute({ view: "login" }));
-    showAuth(session.setupRequired, session.registrationOpen === true, session.setupTokenRequired === true);
+    showAuth(session.setupRequired, session.registrationOpen === true, session.setupTokenRequired === true, session.registrationMode);
     return false;
   }
   // 已登录却停在登录页路由时，回到书架首页
@@ -7758,9 +7769,61 @@ async function openUsersDialog() {
     return;
   }
   $("#users-list").innerHTML = '<p class="empty-state">正在读取用户……</p>';
+  $("#invite-codes-list").innerHTML = '<p class="empty-state">正在读取邀请码……</p>';
+  $("#invite-code-latest").classList.add("hidden");
   $("#users-dialog").showModal();
-  try { renderUsers((await apiPage("/api/users")).items); }
-  catch (error) { $("#users-dialog").close(); toast(error.message, "error"); }
+  try {
+    const [usersPage] = await Promise.all([apiPage("/api/users"), loadRegistrationInvites()]);
+    renderUsers(usersPage.items);
+  } catch (error) { $("#users-dialog").close(); toast(error.message, "error"); }
+}
+
+function registrationModeLabel(mode) {
+  if (mode === "invite") return "需要邀请码才能注册";
+  if (mode === "open") return "完全开放注册";
+  return "彻底禁止注册";
+}
+
+function renderRegistrationInvites(payload) {
+  const mode = payload?.registrationMode === "invite" || payload?.registrationMode === "open"
+    ? payload.registrationMode
+    : "disabled";
+  state.registrationMode = mode;
+  $("#invite-codes-mode").textContent = `当前注册策略：${registrationModeLabel(mode)}。邀请码由系统管理员生成，每个只能使用一次。`;
+  const invites = Array.isArray(payload?.items) ? payload.items : [];
+  $("#invite-codes-list").innerHTML = invites.length
+    ? invites.map((invite) => {
+      const used = Boolean(invite.usedAt);
+      const usedBy = invite.usedBy ? `${invite.usedBy.displayName} · @${invite.usedBy.username}` : "已失效";
+      return `<article class="access-row invite-code-row">
+        <div class="access-person-copy"><strong>${used ? "已使用" : "未使用"}</strong><small>${esc(formatDateTime(invite.createdAt))} 由 ${esc(invite.createdBy.displayName)} 生成${used ? ` · ${esc(usedBy)} 于 ${esc(formatDateTime(invite.usedAt))}` : ""}</small></div>
+        <span>${used ? "已核销" : "待使用"}</span>
+      </article>`;
+    }).join("")
+    : '<p class="empty-state">还没有邀请码。需要邀请码注册时，请先生成。</p>';
+}
+
+async function loadRegistrationInvites() {
+  const payload = await api("/api/registration-invites");
+  renderRegistrationInvites(payload);
+  return payload;
+}
+
+async function generateRegistrationInvite() {
+  const button = $("#invite-code-generate");
+  button.disabled = true;
+  try {
+    const created = await api("/api/registration-invites", { method: "POST", body: {} });
+    const latest = $("#invite-code-latest");
+    latest.innerHTML = `新邀请码（请立即复制，页面不会再次完整显示）：<strong>${esc(created.code)}</strong>`;
+    latest.classList.remove("hidden");
+    await loadRegistrationInvites();
+    toast("邀请码已生成");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderAdminAiConversationFilterOptions(works, users) {
@@ -20355,6 +20418,7 @@ $("#register-form").addEventListener("submit", async (event) => {
         password: form.get("password"),
         passwordConfirmation: form.get("passwordConfirmation"),
         setupToken: form.get("setupToken") || undefined,
+        inviteCode: form.get("inviteCode") || undefined,
         captchaId: form.get("captchaId"),
         captchaAnswer: form.get("captchaAnswer")
       }
@@ -20397,6 +20461,7 @@ $("#platform-usage-pricing-refresh").addEventListener("click", async () => {
   }
 });
 $("#user-management-button").addEventListener("click", openUsersDialog);
+$("#invite-code-generate").addEventListener("click", () => generateRegistrationInvite().catch((error) => toast(error.message, "error")));
 $("#admin-ai-conversations-button").addEventListener("click", () => openAdminAiConversationsDialog().catch((error) => toast(error.message, "error")));
 $("#writing-progress-button").addEventListener("click", () => {
   void openWritingProgressDialog().catch((error) => toast(error.message, "error"));

@@ -22,8 +22,16 @@ describe("注册入口状态", () => {
     const styles = await request(runtime.app).get("/styles.css").expect(200);
 
     expect(page.text).toContain('id="auth-register-tab" type="button" role="tab" aria-selected="false" aria-disabled="true" disabled>注册已禁用</button>');
-    expect(application.text).toContain("function showAuth(setupRequired, registrationOpen = false, setupTokenRequired = false)");
+    expect(application.text).toContain("function showAuth(setupRequired, registrationOpen = false, setupTokenRequired = false, registrationMode = \"disabled\")");
     expect(application.text).toContain("const canRegister = registrationOpen === true;");
+    expect(application.text).toContain("const inviteRequired = registrationMode === \"invite\" && setupRequired !== true;");
+    expect(application.text).toContain("inviteField.classList.toggle(\"hidden\", !inviteRequired);");
+    expect(page.text).toContain('id="register-invite-code-field" class="hidden"');
+    expect(page.text).toContain('name="inviteCode"');
+    expect(page.text).toContain('id="invite-codes-panel"');
+    expect(page.text).toContain('id="invite-code-generate"');
+    expect(application.text).toContain('api("/api/registration-invites"');
+    expect(page.text).toContain("feature=invite-registration-v1");
     expect(application.text).toContain('registerTab.disabled = !canRegister;');
     expect(application.text).toContain('registerTab.setAttribute("aria-disabled", String(!canRegister));');
     expect(application.text).toContain('registerTab.textContent = canRegister ? "注册" : "注册已禁用";');
