@@ -619,7 +619,9 @@ describe("用户、作品权限与操作者追踪 API", () => {
       authenticated: false,
       setupRequired: true,
       setupTokenRequired: true,
-      registrationOpen: true
+      registrationOpen: true,
+      registrationMode: "open",
+      inviteRequired: false
     });
 
     const invalidSetupCaptcha = await solveCaptcha(runtime.app);
@@ -4380,7 +4382,12 @@ describe("用户、作品权限与操作者追踪 API", () => {
     await runtime.close();
     runtime = createUserAuthTestRuntime(false);
     const closedSession = await request(runtime.app).get("/api/auth/session").expect(200);
-    expect(closedSession.body.data).toMatchObject({ setupRequired: true, registrationOpen: false });
+    expect(closedSession.body.data).toMatchObject({
+      setupRequired: true,
+      registrationOpen: false,
+      registrationMode: "disabled",
+      inviteRequired: false
+    });
     const captcha = await solveCaptcha(runtime.app);
     const rejected = await request(runtime.app).post("/api/auth/register").send({
       username: "blocked_first_admin",
