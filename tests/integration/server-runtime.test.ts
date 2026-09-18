@@ -52,6 +52,11 @@ describe("本地服务运行时", () => {
       APP_SETUP_TOKEN: setupToken
     }).allowRegistration).toBe(true);
     expect(resolveRuntimeSecurity({ APP_ALLOW_REGISTRATION: "1", APP_SETUP_TOKEN: setupToken }).allowRegistration).toBe(true);
+    expect(() => resolveRuntimeSecurity({ APP_ALLOW_REGISTRATION: "invite" })).toThrow("APP_SETUP_TOKEN");
+    expect(resolveRuntimeSecurity({
+      APP_ALLOW_REGISTRATION: "invite",
+      APP_SETUP_TOKEN: setupToken
+    })).toMatchObject({ registrationMode: "invite", allowRegistration: true });
   });
 
   it("允许布尔环境变量使用 0 和 1", () => {

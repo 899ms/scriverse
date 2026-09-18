@@ -885,6 +885,43 @@ button.usage-calendar-cell:hover, button.usage-calendar-cell:focus-visible { pos
   cursor: not-allowed;
   opacity: .46;
 }
+.invite-codes-panel {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+}
+.invite-codes-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.invite-codes-heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+.invite-codes-heading .primary-button {
+  min-height: 36px;
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+.invite-code-latest {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--ink);
+  font-family: var(--font-latin), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.invite-code-latest strong { font-weight: 700; letter-spacing: .06em; }
+.invite-code-row { grid-template-columns: minmax(0, 1fr) auto; }
+.invite-code-row > span { font-family: var(--font-latin), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .dialog.admin-ai-conversations-dialog { width: min(1040px, 94vw); height: min(760px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); overflow: hidden; }
 .admin-ai-conversations-dialog { grid-template-rows: auto minmax(0, 1fr) auto; }
 .admin-ai-conversations-dialog[open] { display: grid; }
@@ -1436,7 +1473,8 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
   .module-nav > #reader-open-button,
   .module-nav > button[data-module="comments"],
   .module-nav > button[data-module="outlines"],
-  .module-nav > button[data-work-settings] {
+  .module-nav > button[data-work-settings],
+  .module-nav > #writing-progress-button {
     display: grid;
     grid-template-columns: auto minmax(0, 2em);
     align-items: start;
@@ -1540,9 +1578,10 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
   .chapter-foreshadow-reminder-details { grid-template-columns: minmax(0, 1fr); }
 }
 .editor-body { display: flex; grid-row: 3; min-height: 0; flex-direction: column; }
-.chapter-editor-frame { position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr); flex: 1 1 auto; width: 100%; min-height: 0; margin: 0; overflow: hidden; }
-.chapter-line-numbers { position: relative; z-index: 2; grid-column: 1; grid-row: 1; min-height: 0; overflow: visible; border-right: 1px solid var(--line); background: linear-gradient(to right, transparent, rgba(143,132,116,.04)); color: var(--muted); font-family: var(--font-latin), monospace; font-size: clamp(11px, calc(var(--editor-font-size) * .72), 14px); line-height: 1.2; user-select: none; }
-#chapter-line-numbers-inner { position: absolute; top: 32px; left: 0; right: 0; will-change: transform; }
+.chapter-editor-frame { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; margin: 0; overflow: hidden; }
+.chapter-editor-scroll { position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr); flex: 1 1 auto; width: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.chapter-line-numbers { position: relative; z-index: 2; grid-column: 1; grid-row: 1; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: linear-gradient(to right, transparent, rgba(143,132,116,.04)); color: var(--muted); font-family: var(--font-latin), monospace; font-size: clamp(11px, calc(var(--editor-font-size) * .72), 14px); line-height: 1.2; user-select: none; }
+#chapter-line-numbers-inner { position: absolute; top: 32px; left: 0; right: 0; }
 .chapter-line-number { position: absolute; left: 0; box-sizing: border-box; display: flex; width: 100%; align-items: flex-start; justify-content: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; text-align: center; }
 .chapter-line-number-select { position: relative; display: flex; width: 100%; height: 100%; align-items: flex-start; justify-content: center; padding-inline: 3px; border: 0; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
 .chapter-line-number-select:focus-visible { z-index: 1; outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -1552,12 +1591,12 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
 .chapter-line-number:hover { background: rgba(139,61,44,.08); color: var(--accent-dark); }
 .chapter-line-number.is-line-selected { background: rgba(139,61,44,.16); color: var(--accent-dark); font-weight: 700; }
 .chapter-line-number.is-line-selected::after { content: ""; position: absolute; top: 0; left: 100%; width: 100vw; height: 100%; background: rgba(139,61,44,.085); box-shadow: inset 3px 0 rgba(139,61,44,.28); pointer-events: none; }
-.chapter-content { position: relative; z-index: 1; grid-column: 2; grid-row: 1; resize: none; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 32px 36px 72px; border: 0; background: transparent; border-radius: 0; font-size: var(--editor-font-size); line-height: var(--editor-line-height); letter-spacing: .01em; overflow-wrap: break-word; }
+.chapter-content { position: relative; z-index: 1; grid-column: 2; grid-row: 1; resize: none; width: 100%; height: auto; min-height: 100%; margin: 0; padding: 32px 36px 72px; border: 0; background: transparent; border-radius: 0; font-size: var(--editor-font-size); line-height: var(--editor-line-height); letter-spacing: .01em; overflow-wrap: break-word; overflow: hidden; }
 .app-shell.editor-typewriter-mode .chapter-content { padding-bottom: max(72px, 45dvh); }
 .chapter-content:focus { box-shadow: none; }
 .chapter-whitespace-overlay { position: relative; z-index: 2; grid-column: 2; grid-row: 1; width: 100%; height: 100%; overflow: hidden; opacity: 0; pointer-events: none; }
 .chapter-whitespace-overlay.is-visible { opacity: 1; }
-#chapter-whitespace-inner { box-sizing: border-box; min-height: 100%; color: transparent; white-space: pre-wrap; will-change: transform; }
+#chapter-whitespace-inner { box-sizing: border-box; min-height: 100%; color: transparent; white-space: pre-wrap; }
 .chapter-space-marker { position: relative; color: transparent; }
 .chapter-space-marker::after { content: "·"; position: absolute; inset: 0; color: color-mix(in srgb, var(--muted) 62%, transparent); font-family: var(--font-latin), monospace; text-align: center; }
 .chapter-space-marker.ideographic-space::after { content: "□"; color: color-mix(in srgb, var(--accent) 58%, transparent); font-size: .62em; line-height: 1.7; }
@@ -4210,6 +4249,7 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
   .member-permission-form .primary-button { justify-self: stretch; }
   .access-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
   .access-row select, .access-row button { width: 100%; }
+  .invite-codes-heading { align-items: stretch; flex-direction: column; }
   .admin-ai-conversations-dialog .dialog-header { gap: 10px; }
   .admin-ai-conversations-dialog .dialog-header > div:first-child { min-width: 0; }
   .admin-ai-conversations-dialog .dialog-header-meta { display: none; }
@@ -4506,7 +4546,7 @@ select:focus, input:focus, textarea:focus { border-color: #a77768; box-shadow: 0
   .chapter-content { padding: 22px 16px 64px 12px; font-size: max(16px, var(--editor-font-size)); }
   .app-shell.editor-typewriter-mode .chapter-content { padding-bottom: max(64px, 45dvh); }
   .chapter-line-numbers { width: 32px; font-size: 11px; }
-  .chapter-editor-frame { grid-template-columns: 32px minmax(0, 1fr); }
+  .chapter-editor-scroll { grid-template-columns: 32px minmax(0, 1fr); }
   .chapter-line-measure { left: 32px; }
   .module-view { padding: 26px var(--mobile-gutter) 46px; }
   .module-header { padding-bottom: 18px; }

@@ -21,7 +21,7 @@ describe("工作台模块图预加载", () => {
     const preloadHrefs = [...page.text.matchAll(/<link rel="modulepreload" href="([^"]+)" fetchpriority="low">/gu)]
       .map((match) => match[1]);
 
-    expect(preloadHrefs).toHaveLength(68);
+    expect(preloadHrefs).toHaveLength(69);
     expect(preloadHrefs[0]).toContain("/app.js?v=");
     expect(preloadHrefs).toContain("/reading-preview.js?v=20260813-reader-theme-v2");
     expect(preloadHrefs).toContain("/avatar-crop.js?v=20260725-avatar-crop");
@@ -29,6 +29,7 @@ describe("工作台模块图预加载", () => {
     expect(preloadHrefs).toContain("/ai-skill-menu.js?v=20260830-ai-skill-slash-menu-v1");
     expect(preloadHrefs).toContain("/chapter-line-id-tracker.js?v=20260829-live-annotation-anchors-v1");
     expect(preloadHrefs).toContain("/chapter-editor-behavior.js?v=20260828-centered-scroll-v1");
+    expect(preloadHrefs).toContain("/chapter-editor-scroll.js?v=20260916-line-scroll-bind-v1");
     expect(preloadHrefs).toContain("/text-count.js?v=20260906-chapter-word-count-consistency-v1");
     expect(preloadHrefs).toContain("/toast-stack.js?v=20260909-toast-stack-v2");
     expect(preloadHrefs).toContain("/stream-markdown.js?v=20260912-stream-render-v2");

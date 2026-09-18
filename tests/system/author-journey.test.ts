@@ -94,7 +94,8 @@ describe("作者完整创作流程", () => {
     expect(styles.text).toContain("@container editor-workspace (max-width: 720px)");
     expect(styles.text).toContain(".chapter-stats { display: none; }");
     expect(styles.text).toContain(".editor-body { display: flex; grid-row: 3; min-height: 0; flex-direction: column; }");
-    expect(styles.text).toContain(".chapter-editor-frame { position: relative; display: grid;");
+    expect(styles.text).toContain(".chapter-editor-frame { position: relative; display: flex; flex-direction: column;");
+    expect(styles.text).toContain(".chapter-editor-scroll { position: relative; display: grid;");
     expect(styles.text).toContain(".user-message { width: fit-content; max-width: 60%; margin-left: auto;");
     expect(styles.text).toContain(".ai-prompt { display: block; width: 100%; min-height: 104px; margin: 0;");
     expect(styles.text).toContain(".ai-feed { flex: 1; min-height: 0; overflow-y: auto;");
@@ -339,7 +340,7 @@ describe("作者完整创作流程", () => {
     expect(page.text).toContain('id="shelf-view"');
     expect(page.text).toMatch(/<link[^>]+href="\/styles\.css\?[^"]*feature=ai-prose-acceptance-removed-v1[^"]*"/u);
     expect(page.text).toMatch(/<script[^>]+src="\/app\.js\?[^"]*feature=ai-prose-acceptance-removed-v1[^"]*"/u);
-    expect(page.text).toContain("feature=writing-goal-module-navigation-v1");
+    expect(page.text).toContain("feature=writing-goal-module-navigation-v2");
     expect(page.text).toContain('id="platform-ai-view"');
     expect(page.text).toContain('id="platform-ai-button"');
     expect(page.text).toContain('id="platform-usage-view"');
@@ -590,13 +591,14 @@ describe("作者完整创作流程", () => {
     expect(page.text).toContain('id="top-search-button"');
     expect(page.text).toContain('title="全文检索（Command/Ctrl+F）"');
     expect(page.text).toContain('id="user-management-button" class="settings-hub-card hidden"');
-    expect(page.text).toContain('id="writing-progress-button" type="button"><svg class="nav-icon"');
+    expect(page.text).toContain('id="writing-progress-button" class="module-nav-secondary hidden" type="button"><svg class="nav-icon"');
     expect(page.text).not.toContain('id="writing-progress-button" class="settings-hub-card"');
-    expect(page.text.indexOf('id="writing-progress-button"')).toBeLessThan(page.text.indexOf('id="module-more-button"'));
+    expect(page.text.indexOf('id="module-more-button"')).toBeLessThan(page.text.indexOf('id="writing-progress-button"'));
     expect(page.text).toContain('id="writing-progress-dialog"');
     expect(application.text).toContain("function renderWritingProgress(");
     expect(application.text).toContain("async function saveWritingGoal(");
     expect(application.text).toContain('$("#writing-progress-button").addEventListener("click", () => {');
+    expect(application.text).toContain('$("#writing-progress-button").classList.toggle("permission-hidden", Boolean(state.work) && !canReadModule("editor"))');
     expect(styles.text).toContain(".writing-trend-chart");
     expect(styles.text).toContain(".dialog.writing-progress-dialog { width: min(900px, 94vw); }");
     expect(styles.text).toContain(".writing-trend-bar i { display: block; justify-self: center; width: clamp(4px, 68%, 14px);");
@@ -839,9 +841,11 @@ describe("作者完整创作流程", () => {
     expect(page.text).toMatch(/id="ai-assistant-entry"[^>]*><svg class="nav-icon"[^>]*><path d="M12 5\.25a3\.25/u);
     expect(page.text).toContain('</svg>创作助手</button>');
     expect(page.text).toContain('feature=ai-assistant-brain-icon-v1');
+    expect(page.text).toContain('feature=writing-goal-module-navigation-v2');
+    expect(page.text).toContain('<span class="nav-label">写作目标</span>');
     expect(page.text).toContain('id="module-more-button"');
     expect(page.text).toContain('<span class="nav-label">更多</span>');
-    expect(page.text.match(/class="module-nav-secondary hidden/gu)).toHaveLength(7);
+    expect(page.text.match(/class="module-nav-secondary hidden/gu)).toHaveLength(8);
     expect(page.text.match(/class="nav-icon"/gu)).toHaveLength(18);
     expect(page.text).toContain('data-module="ai-settings"');
     expect(page.text).toContain('data-work-settings');

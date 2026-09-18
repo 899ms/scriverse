@@ -122,8 +122,8 @@ CLI 会按服务器保存登录凭据。所有连接服务的数据命令都可�
 | `APP_AUTH_PASSWORD` | 空 | 可选的部署网关密码，至少 12 个字符；必须通过 HTTPS 传输 |
 | `APP_TRUST_PROXY` | `false` | 位于可信反向代理后时设为代理跳数（通常为 `1`）或 `true` |
 | `APP_ALLOW_PRIVATE_AI_ENDPOINTS` | 开发环境 `true`，生产环境 `false` | 生产环境默认校验 AI 供应商地址并拦截本机、内网、链路本地和保留网段。显式设为 `true`/`1` 后关闭该校验，适用于受信任的透明代理或 fake-ip 部署；启动时会打印警告 |
-| `APP_ALLOW_REGISTRATION` | `false` | 仅明确设为 `true` 或 `1` 时开放注册；未设置或其他值均关闭，首次初始化创建管理员也必须显式开启 |
-| `APP_SETUP_TOKEN` | 空 | 开放注册时必填且至少 32 个字符；仅首位管理员注册需要在页面输入 |
+| `APP_ALLOW_REGISTRATION` | `false` | 三个互斥等级：未设置、`false`、`0` 或其他值表示彻底禁止注册；`invite` 表示需要一次性邀请码才能注册；`true` 或 `1` 表示完全开放注册。`invite` 与开放注册时都必须配置初始化令牌 |
+| `APP_SETUP_TOKEN` | 空 | 开放或邀请码注册时必填且至少 32 个字符；仅首位管理员注册需要在页面输入 |
 | `SCRIVERSE_AVATAR_IMAGE_MAX_BYTES` | `2097152` | 头像图片上传大小上限，单位为字节 |
 | `SCRIVERSE_COVER_IMAGE_MAX_BYTES` | `5242880` | 作品封面图片上传大小上限，单位为字节；封面不支持 GIF |
 | `SCRIVERSE_ATTACHMENT_IMAGE_MAX_BYTES` | `31457280` | 设定库等其他图片附件上传大小上限，单位为字节；包括 GIF |
@@ -155,7 +155,7 @@ APP_AUTH_PASSWORD='请替换为足够长的随机密码' \
 npm start
 ```
 
-生产环境必须在可信反向代理后启用 HTTPS。首次初始化时，将 `APP_ALLOW_REGISTRATION` 设为 `true`，并为 `APP_SETUP_TOKEN` 配置至少 32 个字符的随机值；创建的第一个用户会自动成为系统管理员，且必须在页面输入该令牌。完成后应删除这两个环境变量或关闭注册并重启服务。后续添加普通用户只需临时开放注册，不再要求初始化令牌。可选的 HTTP Basic Auth 仅作为额外部署网关，其凭据只是 Base64 编码，未使用 HTTPS 时不能防止链路窃听。`/api/health` 保持免认证以供探活，业务 API 需要应用内登录。
+生产环境必须在可信反向代理后启用 HTTPS。首次初始化时，将 `APP_ALLOW_REGISTRATION` 设为 `true` 或 `invite`，并为 `APP_SETUP_TOKEN` 配置至少 32 个字符的随机值；创建的第一个用户会自动成为系统管理员，且必须在页面输入该令牌。完成后可将注册改为 `false` 彻底关闭，或改为 `invite` 仅允许持有一次性邀请码的用户注册。后续完全开放注册时不再要求初始化令牌；邀请码模式下普通注册必须填写系统管理员生成的一次性邀请码。可选的 HTTP Basic Auth 仅作为额外部署网关，其凭据只是 Base64 编码，未使用 HTTPS 时不能防止链路窃听。`/api/health` 保持免认证以供探活，业务 API 需要应用内登录。
 
 ## AI 供应商配置
 

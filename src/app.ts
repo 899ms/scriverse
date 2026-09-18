@@ -66,7 +66,7 @@ import {
 } from "./roleplay-memory.js";
 import { paginated, parsePagination } from "./pagination.js";
 import { normalizeUploadFileName } from "./utils.js";
-import { assertSafeAiEndpoint, assertSafeS3Endpoint, createApiRateLimitMiddleware, createAuthenticationRateLimitMiddleware, createBasicAuthMiddleware, createCaptchaRateLimitMiddleware, createExpensiveApiRateLimitMiddleware, createSameOriginMiddleware, createSecurityHeadersMiddleware, createUploadRateLimitMiddleware, enforceCaseInsensitiveRouting, normalizeApiPath, resolveTrustProxySetting, verifySetupToken, type RuntimeSecurityOptions } from "./security.js";
+import { assertSafeAiEndpoint, assertSafeS3Endpoint, createApiRateLimitMiddleware, createAuthenticationRateLimitMiddleware, createBasicAuthMiddleware, createCaptchaRateLimitMiddleware, createExpensiveApiRateLimitMiddleware, createSameOriginMiddleware, createSecurityHeadersMiddleware, createUploadRateLimitMiddleware, enforceCaseInsensitiveRouting, isRegistrationEnabled, normalizeApiPath, resolveRegistrationMode, resolveTrustProxySetting, verifySetupToken, type RuntimeSecurityOptions } from "./security.js";
 import { ImageCaptchaService } from "./image-captcha.js";
 import { ImService } from "./im.js";
 import { ImOrchestrator, type ImRealtimeEvent } from "./im-orchestrator.js";
@@ -203,6 +203,7 @@ const registrationSchema = z.object({
   password: passwordSchema,
   passwordConfirmation: passwordSchema,
   setupToken: z.string().max(500).optional(),
+  inviteCode: z.string().trim().max(32).optional(),
   ...captchaFields
 }).strict().refine((input) => input.password === input.passwordConfirmation, {
   path: ["passwordConfirmation"],
@@ -221,6 +222,20 @@ const desktopLoginSchema = z.object({
   clientVersion: z.string().trim().min(1).max(80),
   ...captchaFields
 }).strict();
+const desktopRegistrationSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  passwordConfirmation: passwordSchema,
+  setupToken: z.string().max(500).optional(),
+  inviteCode: z.string().trim().max(32).optional(),
+  desktopId: z.string().uuid(),
+  profileId: z.string().uuid(),
+  clientVersion: z.string().trim().min(1).max(80),
+  ...captchaFields
+}).strict().refine((input) => input.password === input.passwordConfirmation, {
+  path: ["passwordConfirmation"],
+  message: "两次输入的密码不一致"
+});
 const userUpdateSchema = z.object({ role: z.enum(["admin", "user"]).optional(), status: z.enum(["active", "disabled"]).optional() }).strict();
 const memberRoleValueSchema = z.enum(["editor", "settings-editor", "viewer"]);
 const moduleAccessSchema = z.enum(["none", "read", "write"]);
@@ -1739,15 +1754,37 @@ export function createRuntime(options: RuntimeOptions): Runtime {
   app.use("/api/sync/works", express.json({ limit: "3mb" }));
   app.use(express.json({ limit: "2mb" }));
 
+  const registrationMode = resolveRegistrationMode(options.security);
+  const registrationEnabled = isRegistrationEnabled(registrationMode);
+  const registrationPolicy = (setupRequired: boolean) => ({
+    registrationMode,
+    registrationOpen: registrationEnabled,
+    inviteRequired: registrationMode === "invite" && !setupRequired
+  });
+  const resolvedInviteCode = (inviteCode: string | undefined, setupRequired: boolean): string | undefined => {
+    if (registrationMode !== "invite" || setupRequired) return undefined;
+    const trimmed = inviteCode?.trim() ?? "";
+    if (!trimmed) throw new AppError(400, "INVITE_CODE_REQUIRED", "当前部署需要邀请码才能注册");
+    return trimmed;
+  };
+
   app.get("/api/auth/session", (request, response) => {
     const desktopSession = auth.authenticateDesktop(request);
     const session = desktopSession ? null : auth.authenticate(request);
-    const registrationOpen = options.security?.allowRegistration === true;
     const setupRequired = !auth.hasUsers();
     const setupTokenRequired = setupRequired && Boolean(options.security?.setupToken);
+    const policy = registrationPolicy(setupRequired);
     const developmentUser = getDevelopmentUser();
     if (!session && developmentUser) {
-      data(response, { authenticated: true, user: developmentUser, csrfToken: null, bootId, setupRequired: false, setupTokenRequired: false, registrationOpen });
+      data(response, {
+        authenticated: true,
+        user: developmentUser,
+        csrfToken: null,
+        bootId,
+        setupRequired: false,
+        setupTokenRequired: false,
+        ...registrationPolicy(false)
+      });
       return;
     }
     const interactiveSession = desktopSession ?? session;
@@ -1759,25 +1796,33 @@ export function createRuntime(options: RuntimeOptions): Runtime {
           bootId,
           setupRequired: false,
           setupTokenRequired: false,
-          registrationOpen
+          ...registrationPolicy(false)
         }
-      : { authenticated: false, user: null, csrfToken: null, bootId, setupRequired, setupTokenRequired, registrationOpen });
+      : { authenticated: false, user: null, csrfToken: null, bootId, setupRequired, setupTokenRequired, ...policy });
   });
   app.get("/api/auth/captcha", (_request, response) => {
     data(response, captcha.create());
   });
   app.post("/api/auth/register", (request, response) => {
-    if (options.security?.allowRegistration !== true) {
+    if (!registrationEnabled) {
       throw new AppError(403, "REGISTRATION_DISABLED", "当前部署已关闭新用户注册");
     }
     const input = parse(registrationSchema, request.body);
     captcha.consume(input.captchaId, input.captchaAnswer);
-    if (!auth.hasUsers() && !verifySetupToken(options.security?.setupToken, input.setupToken)) {
+    const setupRequired = !auth.hasUsers();
+    if (setupRequired && !verifySetupToken(options.security?.setupToken, input.setupToken)) {
       throw new AppError(403, "SETUP_TOKEN_INVALID", "初始化令牌无效或未配置");
     }
-    const result = auth.register({ username: input.username, password: input.password });
+    const result = auth.register({
+      username: input.username,
+      password: input.password,
+      inviteCode: resolvedInviteCode(input.inviteCode, setupRequired)
+    });
     setSessionCookie(response, result.token, request.secure);
-    runWithRequestActor(result.session.user, () => store.audit(null, "user.registered", "user", result.session.user.userId, { role: result.session.user.role }));
+    runWithRequestActor(result.session.user, () => store.audit(null, "user.registered", "user", result.session.user.userId, {
+      role: result.session.user.role,
+      ...(result.inviteId ? { inviteId: result.inviteId } : {})
+    }));
     logger.info("auth.registration.succeeded", { actorRef: accountReference(result.session.user.userId) });
     data(response, { user: result.session.user, csrfToken: result.session.csrfToken }, 201);
   });
@@ -1803,6 +1848,34 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     runWithRequestActor(result.session.user, () => store.audit(null, "user.logged-in", "user", result.session.user.userId, { source: "desktop" }));
     logger.info("auth.desktop_login.succeeded", { actorRef: accountReference(result.session.user.userId) });
     data(response, { token: result.token, expiresAt: result.session.expiresAt, user: result.session.user });
+  });
+  app.post("/api/desktop/auth/register", (request, response) => {
+    if (!registrationEnabled) {
+      throw new AppError(403, "REGISTRATION_DISABLED", "当前部署已关闭新用户注册");
+    }
+    const input = parse(desktopRegistrationSchema, request.body);
+    captcha.consume(input.captchaId, input.captchaAnswer);
+    const setupRequired = !auth.hasUsers();
+    if (setupRequired && !verifySetupToken(options.security?.setupToken, input.setupToken)) {
+      throw new AppError(403, "SETUP_TOKEN_INVALID", "初始化令牌无效或未配置");
+    }
+    const result = auth.registerDesktop({
+      username: input.username,
+      password: input.password,
+      inviteCode: resolvedInviteCode(input.inviteCode, setupRequired),
+      desktopId: input.desktopId,
+      profileId: input.profileId,
+      clientVersion: input.clientVersion
+    });
+    imOrchestrator.disconnectUser(result.session.user.userId);
+    response.setHeader("Cache-Control", "no-store");
+    runWithRequestActor(result.session.user, () => store.audit(null, "user.registered", "user", result.session.user.userId, {
+      role: result.session.user.role,
+      source: "desktop",
+      ...(result.inviteId ? { inviteId: result.inviteId } : {})
+    }));
+    logger.info("auth.desktop_registration.succeeded", { actorRef: accountReference(result.session.user.userId) });
+    data(response, { token: result.token, expiresAt: result.session.expiresAt, user: result.session.user }, 201);
   });
   app.use(createUserSessionMiddleware(auth, {
     disabled: options.disableUserAuth === true,
@@ -1934,6 +2007,24 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     if (updated.status !== "active") imOrchestrator.disconnectUser(updated.userId);
     store.audit(null, "user.updated", "user", updated.userId, { role: updated.role, status: updated.status });
     data(response, updated);
+  });
+  app.get("/api/registration-invites", (request, response) => {
+    if (!request.authUser) throw new AppError(401, "AUTH_REQUIRED", "请先登录");
+    if (request.authUser.role !== "admin") throw new AppError(403, "ADMIN_REQUIRED", "该操作仅限系统管理员");
+    data(response, {
+      registrationMode,
+      registrationOpen: registrationEnabled,
+      items: auth.listRegistrationInvites()
+    });
+  });
+  app.post("/api/registration-invites", (request, response) => {
+    if (!request.authUser) throw new AppError(401, "AUTH_REQUIRED", "请先登录");
+    if (request.authUser.role !== "admin") throw new AppError(403, "ADMIN_REQUIRED", "该操作仅限系统管理员");
+    parse(z.object({}).strict(), request.body ?? {});
+    const created = auth.createRegistrationInvite(request.authUser);
+    store.audit(null, "registration-invite.created", "registration-invite", created.id, {});
+    logger.info("auth.registration_invite.created", { actorRef: accountReference(request.authUser.userId) });
+    data(response, created, 201);
   });
 
   const requireImUser = (request: Request): AuthUser => {
