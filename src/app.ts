@@ -15,6 +15,7 @@ import { AI_PROVIDER_PROTOCOL_OPTIONS, AI_PROVIDER_PROTOCOLS, AI_THINKING_TYPES,
 import { MAX_AI_ANALYSIS_TIMEOUT_SECONDS, MIN_AI_ANALYSIS_TIMEOUT_SECONDS } from "./ai-analysis-timeout.js";
 import { aiConversationExportContentDisposition, exportAiConversationMarkdown } from "./ai-conversation-export.js";
 import { DEFAULT_AI_CHAT_TAB_LIMIT } from "./ai-chat-tab-limit.js";
+import { DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH } from "./chapter-annotation-note.js";
 import type { AiRetryPolicy } from "./ai-retry.js";
 import {
   MAX_AI_STREAM_IDLE_TIMEOUT_SECONDS,
@@ -1070,6 +1071,8 @@ export type RuntimeOptions = {
   liteLlmPriceCache?: LiteLlmPriceCache;
   /** 同一浏览器工作区允许同时打开的 Agent 对话数量。 */
   aiChatTabLimit?: number;
+  /** 正文评论和待办内容的最大字符数。 */
+  chapterAnnotationNoteMaxLength?: number;
   /** 测试与嵌入运行时可替换 S3 客户端及数据库快照来源。 */
   backupOptions?: S3BackupManagerOptions;
 };
@@ -1493,6 +1496,7 @@ function redactVersionSnapshots(
 export function createRuntime(options: RuntimeOptions): Runtime {
   const uploadLimits = options.uploadLimits ?? DEFAULT_IMAGE_UPLOAD_LIMITS;
   const aiChatTabLimit = options.aiChatTabLimit ?? DEFAULT_AI_CHAT_TAB_LIMIT;
+  const chapterAnnotationNoteMaxLength = options.chapterAnnotationNoteMaxLength ?? DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH;
   const requestedAiStreamHeartbeatIntervalMs = Number(options.aiStreamHeartbeatIntervalMs);
   const aiStreamHeartbeatIntervalMs = Number.isFinite(requestedAiStreamHeartbeatIntervalMs)
     ? Math.max(1, Math.trunc(requestedAiStreamHeartbeatIntervalMs))
@@ -1689,7 +1693,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     auth,
     resolveAnalysisTask: (workId, input) => ai.resolveTaskInput(workId, input),
     startAnalysisTask: (workId, input) => store.createTask(workId, input)
-  });
+  }, { chapterAnnotationNoteMaxLength });
   ai.attachWritePlanManager(aiWritePlanManager);
   const app = express();
   enforceCaseInsensitiveRouting(app);
@@ -1740,6 +1744,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
       protocols: [...AI_PROVIDER_PROTOCOLS],
       development: options.developmentServer === true,
       aiChatTabLimit,
+      chapterAnnotationNoteMaxLength,
       uploadLimits
     });
   });
@@ -2714,12 +2719,12 @@ export function createRuntime(options: RuntimeOptions): Runtime {
       kind: z.enum(["note", "todo"]),
       startLine: z.number().int().positive(),
       endLine: z.number().int().positive(),
-      note: z.string().trim().min(1).max(2000)
+      note: z.string().trim().min(1).max(chapterAnnotationNoteMaxLength)
     }).strict().refine((value) => value.endLine >= value.startLine, { message: "结束行不能早于开始行", path: ["endLine"] }), request.body);
     data(response, store.createChapterAnnotation(request.params.chapterId, input), 201);
   });
   app.patch("/api/chapter-annotations/:annotationId", (request, response) => {
-    const input = parse(z.object({ note: z.string().trim().min(1).max(2000).optional(), status: z.enum(["open", "resolved"]).optional(), expectedVersionNo: expectedVersionNoSchema }).strict().refine((value) => value.note !== undefined || value.status !== undefined, { message: "至少需要修改一项" }), request.body);
+    const input = parse(z.object({ note: z.string().trim().min(1).max(chapterAnnotationNoteMaxLength).optional(), status: z.enum(["open", "resolved"]).optional(), expectedVersionNo: expectedVersionNoSchema }).strict().refine((value) => value.note !== undefined || value.status !== undefined, { message: "至少需要修改一项" }), request.body);
     const { expectedVersionNo, ...update } = input;
     data(response, store.updateChapterAnnotation(request.params.annotationId, update, expectedVersionNo));
   });

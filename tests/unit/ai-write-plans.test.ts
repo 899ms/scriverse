@@ -141,6 +141,26 @@ describe("normalizePlanOperations", () => {
     )).toThrowError(/结束行不能早于开始行/u);
   });
 
+  it("批注内容默认最长 6000 个字符，并接受注入的上限", () => {
+    const allowed = "界".repeat(6000);
+    const [operation] = normalizePlanOperations(
+      [{ opType: "create_annotation", chapterId: "c1", kind: "note", startLine: 1, endLine: 1, note: allowed }],
+      5
+    );
+    expect(operation).toMatchObject({ note: allowed });
+    expect(() => normalizePlanOperations(
+      [{ opType: "create_annotation", chapterId: "c1", kind: "note", startLine: 1, endLine: 1, note: "界".repeat(6001) }],
+      5
+    )).toThrowError(AppError);
+    const custom = "待".repeat(20000);
+    const [customOperation] = normalizePlanOperations(
+      [{ opType: "create_annotation", chapterId: "c1", kind: "todo", startLine: 1, endLine: 1, note: custom }],
+      5,
+      20000
+    );
+    expect(customOperation).toMatchObject({ note: custom });
+  });
+
   it("章节大纲操作需要 chapterId，关系端点不能相同", () => {
     expect(() => normalizePlanOperations(
       [{ opType: "update_entry", entityType: "chapter-outline", input: { goal: "g" } }],

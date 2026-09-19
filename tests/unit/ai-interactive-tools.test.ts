@@ -94,6 +94,16 @@ describe("AI 可写交互工具（propose_write_plan / ask_user_question）", ()
       additionalProperties: false
     });
     expect(updateSetting?.required).toContain("entityId");
+    const createAnnotation = variants.find((variant) => {
+      const variantProperties = variant.properties as Record<string, { enum?: string[]; maxLength?: number }>;
+      return variantProperties.opType?.enum?.[0] === "create_annotation";
+    });
+    expect(createAnnotation).toBeDefined();
+    expect((createAnnotation?.properties as Record<string, { maxLength?: number }>).note).toMatchObject({
+      type: "string",
+      minLength: 1,
+      maxLength: 6000
+    });
   });
 
   async function callTool(name: string, args: unknown, conversationId?: string) {

@@ -1272,6 +1272,7 @@ let chapterSelectionRequestGeneration = 0;
 let aiConversationNavigationGeneration = 0;
 let aiConversationNavigationPending = null;
 let aiChatTabLimit = 5;
+let chapterAnnotationNoteMaxLength = 6000;
 let aiConversationWorkspaceOpen = false;
 const loadedVolumeChapterIds = new Set();
 const volumeChapterLoadingIds = new Set();
@@ -3226,6 +3227,12 @@ function applyAiChatTabLimit(value) {
     setAiConversationSwitcherVisible(false);
   }
   renderAiChatTabs();
+}
+
+function applyChapterAnnotationNoteMaxLength(value) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) return;
+  chapterAnnotationNoteMaxLength = Math.min(20000, Math.max(2000, parsed));
 }
 
 function renderAiChatTabs() {
@@ -6083,7 +6090,7 @@ async function createSelectedLineAnnotation(kind) {
     title: kind === "todo" ? "添加正文待办" : "添加正文评论",
     inputLabel: kind === "todo" ? "待办内容" : "评论内容",
     confirmLabel: "添加",
-    maxLength: 2000
+    maxLength: chapterAnnotationNoteMaxLength
   });
   if (!note) return;
   try {
@@ -6152,7 +6159,7 @@ function bindChapterAnnotationCards(host, annotations, { refresh, locate, overla
         inputLabel: annotation.kind === "todo" ? "待办内容" : "评论内容",
         value: annotation.note,
         confirmLabel: "保存",
-        maxLength: 2000
+        maxLength: chapterAnnotationNoteMaxLength
       });
       if (!note) return resumeOverlay();
       try {
@@ -6520,6 +6527,7 @@ async function api(path, options = {}) {
   if (path === "/api/health") {
     applyImageUploadLimits(payload.data?.uploadLimits);
     applyAiChatTabLimit(payload.data?.aiChatTabLimit);
+    applyChapterAnnotationNoteMaxLength(payload.data?.chapterAnnotationNoteMaxLength);
     updateSystemHealth({
       status: payload.data?.status === "ok" ? "ready" : "degraded",
       version: payload.data?.version
