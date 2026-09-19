@@ -34,6 +34,7 @@ import {
   CHARACTER_EXTRACTION_MAX_NAME_LENGTH,
   CHARACTER_EXTRACTION_MAX_SPECIES_LENGTH
 } from "./character-extraction.js";
+import { characterAttributesInputSchema, characterStateInputSchema } from "./character-structured-fields.js";
 import {
   AiWritePlanManager,
   AI_USER_QUESTION_STATUSES,
@@ -378,9 +379,9 @@ const characterSchema = z.object({
   aliases: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
   raceId: identifier.nullable().optional(),
   organizationIds: z.array(identifier).max(100).optional(),
-  attributes: jsonObject.optional(),
+  attributes: characterAttributesInputSchema.optional(),
   profile: jsonObject.optional(),
-  currentState: jsonObject.optional(),
+  currentState: characterStateInputSchema.optional(),
   lockedFields: optionalStrings,
   firstChapterId: identifier.nullable().optional()
 }).strict();

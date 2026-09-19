@@ -11,6 +11,7 @@ import {
   type WorkModulePermissions
 } from "./work-permissions.js";
 import { id, json, now } from "./utils.js";
+import { normalizeCharacterAttributes } from "./public/character-profile.js";
 
 export const IM_MAX_AI_PARTICIPANTS = 10;
 export const IM_MAX_HUMAN_PARTICIPANTS = 50;
@@ -351,7 +352,7 @@ export class ImService {
         code: requiredString(row.code),
         gender: requiredString(row.gender),
         isDead: booleanValue(row.is_dead),
-        attributes: json<Record<string, unknown>>(requiredString(row.attributes_json), {}),
+        attributes: normalizeCharacterAttributes(json<Record<string, unknown>>(requiredString(row.attributes_json), {})),
         profile: json<Record<string, unknown>>(requiredString(row.profile_json), {})
       };
       const avatarSha256 = optionalString(row.avatar_sha256);

@@ -156,6 +156,36 @@ describe("normalizePlanOperations", () => {
     )).toThrowError(/不能指向自身/u);
   });
 
+  it("剪枝角色混写属性后再纳入计划", () => {
+    const [operation] = normalizePlanOperations([{
+      opType: "create_entry",
+      entityType: "character",
+      input: {
+        name: "陈阿生",
+        attributes: {
+          身份定位: "主角",
+          修为: "未踏入修行",
+          identity: "",
+          details: [{ label: "身高·", value: "1米1" }]
+        }
+      }
+    }], 5);
+    expect(operation).toMatchObject({
+      opType: "create_entry",
+      entityType: "character",
+      input: {
+        name: "陈阿生",
+        attributes: {
+          identity: "主角",
+          details: [
+            { label: "修为", value: "未踏入修行" },
+            { label: "身高", value: "1米1" }
+          ]
+        }
+      }
+    });
+  });
+
   it("计划入参 schema 要求非空简述", () => {
     expect(createAiWritePlanInputSchema.safeParse({ aiSummary: "", operations: [] }).success).toBe(false);
   });

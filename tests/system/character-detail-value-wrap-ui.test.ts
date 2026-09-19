@@ -23,7 +23,7 @@ describe("人物扩展属性内容换行", () => {
       request(runtime.app).get("/").expect(200)
     ]);
 
-    expect(application.text).toContain('field("details", "扩展属性", "key-value-list", item?.attributes?.details, { multilineValue: true })');
+    expect(application.text).toContain('field("details", "扩展属性", "key-value-list", attributes.details, { multilineValue: true })');
     expect(application.text).toContain('class="key-value-list-value"');
     expect(application.text).toContain('rows="1"');
     expect(application.text).toContain('CSS.supports("field-sizing", "content")');

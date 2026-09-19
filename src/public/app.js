@@ -80,7 +80,7 @@ import { AI_CHAT_IMAGE_ATTACHMENT_MAX_COUNT, aiChatImageAttachmentIds, isAiChatI
 import { findTextMatches, replaceTextMatches } from "/chapter-search.js?v=20260818-chapter-search-replace-v1";
 import { MAX_CHAPTER_LINE_IDS, normalizeChapterLineIdDraft, reconcileChapterLineIdDraft, remapChapterLineCounts } from "/chapter-line-id-tracker.js?v=20260829-live-annotation-anchors-v1";
 import { THEME_STORAGE_KEY, nextTheme, normalizeTheme, themeToggleLabel } from "/theme.js?v=20260713-dark-mode";
-import { buildCharacterDetails, buildCharacterState, characterStateEntries, normalizeCharacterDetails, normalizeCharacterSections } from "/character-profile.js?v=20260713-character-editor";
+import { buildCharacterDetails, buildCharacterState, characterStateEntries, normalizeCharacterAttributes, normalizeCharacterDetails, normalizeCharacterSections } from "/character-profile.js?v=20260919-character-attributes-prune-v1";
 import { characterVersionSourceLabel, describeCharacterVersionChanges } from "/character-version.js?v=20260816-character-gender-v1";
 import { chapterDiffSummary, diffChapterLines } from "/chapter-version-diff.js?v=20260812-chapter-version-diff-v1";
 import { VERSIONED_ENTITY_LABELS, entityVersionSnapshotSummary, entityVersionSourceLabel } from "/entity-version.js?v=20260809-global-replace-v1";
@@ -11788,11 +11788,12 @@ async function renderCharacters(page = characterListPage) {
     ? `<span class="character-lock-badge" aria-label="${item.lockedFields.length} 个锁定字段" title="锁定字段：${esc(item.lockedFields.join("、"))}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><span>${item.lockedFields.length}</span></span>`
     : "";
   const characterCards = () => `<div class="card-grid">${pageCharacters.map((item) => {
-    const details = normalizeCharacterDetails(item.attributes?.details);
+    const attributes = normalizeCharacterAttributes(item.attributes);
+    const details = attributes.details ?? [];
     return `
     <article class="record-card character-card preview-record-card has-card-edit has-pin-control" data-open-character="${esc(item.id)}" role="button" tabindex="0" aria-label="查看角色 ${esc(item.name)}">${characterPinButton(item)}${characterFavoriteButton(item)}${recordCardEditButton("edit-character", item.id, `角色“${item.name}”`)}
     <div class="character-card-heading">${characterAvatarHtml(item)}<h3>${esc(item.name)}</h3>${entityLifecycleBadge(item.isDead, "已死亡")}${characterLockBadge(item)}</div>
-    ${item.attributes?.identity ? `<p class="character-identity">${esc(item.attributes.identity)}</p>` : ""}
+    ${attributes.identity ? `<p class="character-identity">${esc(attributes.identity)}</p>` : ""}
     <div class="character-gender"><b>性别</b><span class="pill">${esc(characterGenderLabel(item.gender))}</span></div>
     ${item.aliases.length ? `<div class="character-aliases"><b>别名</b>${item.aliases.map((alias) => `<span class="pill">${esc(alias)}</span>`).join("")}</div>` : ""}
     ${item.code ? `<div class="character-code"><b>编号</b><span class="pill">${esc(item.code)}</span></div>` : ""}
@@ -11804,7 +11805,7 @@ async function renderCharacters(page = characterListPage) {
     </article>`;
   }).join("")}</div>`;
   const characterRows = () => `<div class="module-row-list">${pageCharacters.map((item) => {
-    const preview = moduleRowPreview(item.profile?.summary || item.attributes?.identity || Object.entries(item.currentState).map(([key, value]) => `${characterStateFieldLabel(key)}：${value}`).join(" ") || "尚未记录当前状态");
+    const preview = moduleRowPreview(item.profile?.summary || normalizeCharacterAttributes(item.attributes).identity || Object.entries(item.currentState).map(([key, value]) => `${characterStateFieldLabel(key)}：${value}`).join(" ") || "尚未记录当前状态");
     const meta = [
       item.code ? `编号 ${item.code}` : "",
       `性别 ${characterGenderLabel(item.gender)}`,
@@ -13663,7 +13664,7 @@ async function openRelationshipIdentityRepairDialog(task, failure) {
   const character = await api(`/api/characters/${encodeURIComponent(details.characterId)}`);
   const anchors = [
     character.code,
-    character.attributes?.identity,
+    normalizeCharacterAttributes(character.attributes).identity,
     character.race?.name || character.species,
     ...(Array.isArray(character.organizations) ? character.organizations.map((organization) => organization.name) : [])
   ].map((value) => String(value ?? "").trim()).filter(Boolean);
@@ -13682,7 +13683,7 @@ async function openRelationshipIdentityRepairDialog(task, failure) {
     <label>角色标准名<input type="text" value="${esc(character.name)}" readonly></label>
     ${field("aliases", "确认别名", "item-list", character.aliases ?? [])}
     ${field("code", "人物编号或代号", "text", character.code)}
-    ${field("identity", "身份与定位", "text", character.attributes?.identity)}
+    ${field("identity", "身份与定位", "text", normalizeCharacterAttributes(character.attributes).identity)}
     <button class="ghost-button relationship-identity-full-profile" type="button" data-open-identity-character-profile>打开完整人物档案</button>`,
     async (form) => {
       const aliases = form.getAll("aliases").map((value) => String(value).trim()).filter(Boolean);
@@ -13693,7 +13694,7 @@ async function openRelationshipIdentityRepairDialog(task, failure) {
         body: {
           aliases,
           code,
-          attributes: { ...(character.attributes ?? {}), identity },
+          attributes: normalizeCharacterAttributes({ ...(character.attributes ?? {}), identity }),
           expectedVersionNo: character.versionNo,
           changeNote: `修复人物关系来源匹配：${failure.message}`.slice(0, 500)
         }
@@ -17361,6 +17362,7 @@ function renderCharacterEditorFields(item) {
   const organizationOptions = state.organizations.map((organization) => [organization.id, organization.name]);
   const chapterOptions = [["", "未指定"], ...(state.work?.volumes ?? []).flatMap((volume) => volume.chapters.map((chapter) => [chapter.id, `${volume.title} / ${chapter.title}`]))];
   const stateEntries = characterStateEntries(item?.currentState ?? {});
+  const attributes = normalizeCharacterAttributes(item?.attributes);
   const raceField = !canReadModule("races")
     ? '<div class="character-editor-empty-field"><b>种族</b><span>当前账户没有种族模块读取权限，原有绑定不会被修改。</span></div>'
     : state.races.length
@@ -17382,12 +17384,12 @@ function renderCharacterEditorFields(item) {
         : '<div class="character-editor-empty-field"><b>首次登场章节</b><span>当前账户没有正文读取权限，原有绑定不会被修改。</span></div>')),
     characterEditorSection("profile", "人物档案", "记录人物定位、行为动力、公开人设和便于创作时快速理解的简介。",
       field("code", "编号", "text", item?.code) +
-      field("identity", "身份与定位", "text", item?.attributes?.identity) +
+      field("identity", "身份与定位", "text", attributes.identity) +
       field("motivation", "核心动机", "textarea", item?.profile?.motivation) +
       field("summary", "人物简介", "textarea", item?.profile?.summary) +
       '<div class="form-field"><span>人设摘要</span><small>关系扮演时作为公开人设注入对方可见的角色卡，不会包含私密档案或 Markdown 章节。</small><textarea name="personaSummary" maxlength="20000" aria-label="人设摘要">' + esc(item?.profile?.personaSummary ?? "") + "</textarea></div>"),
     characterEditorSection("settings", "扩展设定", "可用短属性和 Markdown 长章节承载形态、能力、生态、经历与研究记录。",
-      field("details", "扩展属性", "key-value-list", item?.attributes?.details, { multilineValue: true }) +
+      field("details", "扩展属性", "key-value-list", attributes.details, { multilineValue: true }) +
       '<div id="character-markdown-sections" class="character-markdown-sections"></div>'),
     characterEditorSection("state", "状态与约束", "维护任意当前状态，并明确禁止 AI 自行覆盖的字段。",
       field("isDead", "标记为已死亡", "checkbox", item?.isDead ?? false) +
@@ -17430,11 +17432,11 @@ function collectCharacterBody(form) {
     isDead: form.has("isDead"),
     code: String(form.get("code") ?? "").trim(),
     aliases: form.getAll("aliases").map((value) => String(value).trim()).filter(Boolean),
-    attributes: {
-      ...(item?.attributes ?? {}),
+    attributes: normalizeCharacterAttributes({
+      species: typeof item?.attributes?.species === "string" ? item.attributes.species : "",
       identity: String(form.get("identity") ?? "").trim(),
       details: buildCharacterDetails(form.getAll("detailLabel"), form.getAll("detailValue"))
-    },
+    }),
     profile: {
       ...profile,
       motivation: String(form.get("motivation") ?? "").trim(),
