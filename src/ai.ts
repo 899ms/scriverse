@@ -84,6 +84,7 @@ import {
 } from "./character-extraction.js";
 import type { AiWritePlanManager, AiWriteToolId, AnalysisTaskInput, ResolvedAnalysisTaskInput } from "./ai-write-plans.js";
 import { AI_WRITE_TOOL_IDS, aiWritePlanOperationToolSchemas, askAiUserQuestionInputSchema } from "./ai-write-plans.js";
+import { DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH } from "./chapter-annotation-note.js";
 import { PLATFORM_AI_WORK_ID, type Row } from "./database.js";
 import {
   AiStreamSteerMailbox,
@@ -1960,7 +1961,10 @@ const AGENT_TOOL_DEFINITIONS: Record<AgentToolId, Record<string, unknown>> = {
   }
 };
 
-export function writePlanToolDefinition(toggles: Record<AiWriteToolId, boolean>): Record<string, unknown> {
+export function writePlanToolDefinition(
+  toggles: Record<AiWriteToolId, boolean>,
+  chapterAnnotationNoteMaxLength = DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH
+): Record<string, unknown> {
   const entityTypes = [
     ...(toggles.settings ? ["setting"] : []),
     ...(toggles.characters ? ["character"] : []),
@@ -1970,7 +1974,7 @@ export function writePlanToolDefinition(toggles: Record<AiWriteToolId, boolean>)
     ...(toggles.relationships ? ["relationship"] : []),
     ...(toggles.outlines ? ["chapter-outline", "foreshadow"] : [])
   ];
-  const operationSchemas = aiWritePlanOperationToolSchemas(toggles);
+  const operationSchemas = aiWritePlanOperationToolSchemas(toggles, chapterAnnotationNoteMaxLength);
   const operationTypes = [
     ...(entityTypes.length > 0 ? ["create_entry", "update_entry"] : []),
     ...(toggles.annotations ? ["create_annotation"] : []),
@@ -8414,11 +8418,13 @@ export class AiManager {
     roleplayCharacterIdOverride?: string | null
   ): Record<string, unknown>[] {
     const toolIds = this.enabledAgentToolIds(workId, taskType, requestedToolIds, conversationId, roleplayCharacterIdOverride);
-    const writeToggles = this.aiWritePlanManager && conversationId
-      ? this.aiWritePlanManager.getConversationTools(workId, conversationId)
+    const writePlanManager = this.aiWritePlanManager;
+    const writeToggles = writePlanManager && conversationId
+      ? writePlanManager.getConversationTools(workId, conversationId)
       : null;
+    const chapterAnnotationNoteMaxLength = writePlanManager?.chapterAnnotationNoteMaxLength ?? DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH;
     const builtInTools = toolIds.map((toolId) => toolId === "propose_write_plan" && writeToggles
-      ? writePlanToolDefinition(writeToggles)
+      ? writePlanToolDefinition(writeToggles, chapterAnnotationNoteMaxLength)
       : AGENT_TOOL_DEFINITIONS[toolId]);
     const roleplayCharacterId = roleplayCharacterIdOverride === undefined
       ? this.roleplayCharacterId(workId, conversationId)

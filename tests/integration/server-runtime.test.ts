@@ -19,6 +19,7 @@ import {
 } from "../../src/server-runtime.js";
 import { APP_VERSION, SCRIVERSE_BETA_COMMIT_ENV } from "../../src/version.js";
 import { AI_CHAT_TAB_LIMIT_ENV } from "../../src/ai-chat-tab-limit.js";
+import { CHAPTER_ANNOTATION_NOTE_MAX_LENGTH_ENV } from "../../src/chapter-annotation-note.js";
 import { loadMasterSecret } from "../../src/credential-vault.js";
 import { DATABASE_SCHEMA_VERSION, Database, readDatabaseSchemaVersion } from "../../src/database.js";
 import { logger } from "../../src/logger.js";
@@ -268,6 +269,24 @@ describe("本地服务运行时", () => {
       data: { aiChatTabLimit: number };
     };
     expect(health.data.aiChatTabLimit).toBe(1);
+  });
+
+  it("通过环境变量将正文评论长度上限传入运行时健康接口", async () => {
+    const root = mkdtempSync(join(tmpdir(), "scriverse-annotation-note-limit-"));
+    roots.push(root);
+    const running = await startLocalServer({
+      host: "127.0.0.1",
+      port: 0,
+      dataDirectory: root,
+      databasePath: join(root, "novel.db"),
+      env: { NODE_ENV: "test", [CHAPTER_ANNOTATION_NOTE_MAX_LENGTH_ENV]: "1999" }
+    });
+    runningServers.push(running);
+
+    const health = await fetch(`${running.url}/api/health`).then((response) => response.json()) as {
+      data: { chapterAnnotationNoteMaxLength: number };
+    };
+    expect(health.data.chapterAnnotationNoteMaxLength).toBe(2000);
   });
 
   it("解析迁移备份保留数量并限制最低值", () => {
