@@ -188,7 +188,7 @@ export const cliResourceDefinitions = {
         lockedFields: "锁定字段数组",
         firstChapterId: "首次出场章节 ID 或 null"
       },
-      example: { name: "林舟", aliases: ["阿舟"], attributes: { age: 24 }, profile: { motivation: "寻找失踪的姐姐" }, currentState: { location: "北港" } }
+      example: { name: "林舟", aliases: ["阿舟"], attributes: { identity: "北港领航员", details: [{ label: "age", value: "24" }] }, profile: { motivation: "寻找失踪的姐姐" }, currentState: { location: "北港" } }
     },
     update: {
       properties: { name: "新主名", gender: "性别：male | female | none | unknown", isDead: "是否已死亡", aliases: "完整别名数组", raceId: "种族 ID 或 null", organizationIds: "完整组织数组", attributes: "完整属性对象", profile: "完整人物档案对象", currentState: "完整当前状态对象", lockedFields: "锁定字段数组", visibility: "可见范围", firstChapterId: "首次出场章节", changeNote },

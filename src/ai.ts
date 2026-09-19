@@ -2865,7 +2865,16 @@ export class ContextBuilder {
             const state = item.currentState as Record<string, unknown>;
             const values = locked.map((key) => {
               const entityValue = item[key];
-              const value = entityValue === undefined || entityValue === null || entityValue === "" ? attributes[key] ?? state[key] : entityValue;
+              const detailMatch = Array.isArray(attributes.details)
+                ? attributes.details.find((detail) => detail && typeof detail === "object" && !Array.isArray(detail)
+                  && String((detail as Record<string, unknown>).label ?? "") === key)
+                : undefined;
+              const detailValue = detailMatch && typeof detailMatch === "object"
+                ? (detailMatch as Record<string, unknown>).value
+                : undefined;
+              const value = entityValue === undefined || entityValue === null || entityValue === ""
+                ? attributes[key] ?? detailValue ?? state[key]
+                : entityValue;
               return `${key}=${String(value ?? "未填写")}`;
             }).join("；");
             return `- ${String(item.name)}：${values}`;

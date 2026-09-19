@@ -6,6 +6,7 @@ import { UserAuthService } from "./user-auth.js";
 import { AppError } from "./errors.js";
 import { logger } from "./logger.js";
 import { id as randomId, json, now } from "./utils.js";
+import { characterAttributesInputSchema, characterStateInputSchema } from "./character-structured-fields.js";
 import {
   canReadWorkModule,
   canWriteWorkModule,
@@ -150,9 +151,9 @@ const characterInputSchema = z.object({
   aliases: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
   raceId: identifierSchema.nullable().optional(),
   organizationIds: z.array(identifierSchema).max(100).optional(),
-  attributes: jsonObjectSchema.optional(),
+  attributes: characterAttributesInputSchema.optional().describe("身份与扩展属性。只使用 identity 字符串和 details[{label,value}]；其他键会在入库时折入 details。"),
   profile: jsonObjectSchema.optional(),
-  currentState: jsonObjectSchema.optional()
+  currentState: characterStateInputSchema.optional()
 }).strict();
 
 /** 种族可写字段：成员归属与分节设定结构保留给人工。 */

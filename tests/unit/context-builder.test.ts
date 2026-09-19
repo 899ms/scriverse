@@ -96,6 +96,26 @@ describe("AI 上下文组装", () => {
     expect(context).toContain("林舟抵达北港");
   });
 
+  it("锁定字段能从剪枝后的扩展属性取值", async () => {
+    const runtime = createTestRuntime();
+    runtimes.push(runtime);
+    const { work, chapter } = await seedChapter(runtime);
+    const character = runtime.store.createCharacter(String(work.id), {
+      name: "陈阿生",
+      attributes: { 修为: "炼气一层", identity: "船户" },
+      lockedFields: ["修为"]
+    });
+
+    const context = new ContextBuilder(runtime.store).build(String(work.id), {
+      type: "chapter",
+      chapterId: String(chapter.id),
+      characterIds: [String(character.id)]
+    });
+
+    expect(context).toContain("修为=炼气一层");
+    expect(context).not.toContain("修为=未填写");
+  });
+
   it("关闭注入设定信息后正文范围只保留章节正文", async () => {
     const runtime = createTestRuntime();
     runtimes.push(runtime);
