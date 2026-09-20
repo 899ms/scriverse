@@ -1,4 +1,4 @@
-export const APP_VERSION = "1.0.12";
+export const APP_VERSION = "1.1.0";
 
 export const SCRIVERSE_BETA_COMMIT_ENV = "SCRIVERSE_BETA_COMMIT";
 
