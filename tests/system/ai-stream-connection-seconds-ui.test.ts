@@ -12,13 +12,14 @@ describe("AI 流连接耗时显示", () => {
     ]);
 
     expect(page).toContain("&feature=ai-stream-connection-seconds-v1");
-    expect(application).toContain("正在连接模型流…… <span class=\"ai-stream-connection-seconds\" data-testid=\"ai-stream-connection-seconds\"></span> 秒");
+    expect(application).toContain('meta.replaceChildren("正在请求…… ", connectionSeconds, " 秒")');
     expect(application).toContain("Math.floor((Date.now() - streamConnectionStartedAt) / 1000)");
     expect(application).toContain("let streamConnectionTimer = window.setInterval(renderStreamConnectionElapsed, 1000);");
     expect(application).toContain("window.clearInterval(streamConnectionTimer);");
     expect(application).toContain("streamConnectionTimer = null;");
     expect(application).toContain('new Set(["continuation", "delta", "process_step", "tool_call", "context_compacted", "complete", "request_status", "error"])');
-    expect(application).toContain("if (streamConnectionEstablishedEvents.has(eventName) || eventName === \"steer\") stopStreamConnectionTimer();");
+    expect(application).toContain('if (streamConnectionEstablishedEvents.has(eventName) || eventName === "steer") {');
+    expect(application).toContain("stopStreamConnectionTimer();\n        streamConnectionEstablished = true;");
     expect(styles).toContain(".message-meta .ai-stream-connection-seconds { display: inline-block; min-width: 3ch; font-variant-numeric: tabular-nums; text-align: right; }");
   });
 });

@@ -1,3 +1,4 @@
+import { applyChapterDirectoryMove, chapterDirectoryEntry } from "/chapter-directory.js?v=20260921-directory-performance-v1";
 import { buildRelationshipGraph, createGalaxyRenderer, normalizeGalaxyFrameRate, normalizeGalaxyMotionMode, renderRelationshipMindMap } from "/relationship-graph.js?v=20260817-relationship-canvas-scale-v1&feature=galaxy-motion-mode-v3&feature=galaxy-edge-label-threshold-v1";
 import { formatDateTime, normalizeParagraphSpacing } from "/text-formatting.js?v=20260713-saved-at-seconds";
 import { countProseWords } from "/text-count.js?v=20260906-chapter-word-count-consistency-v1";
@@ -6,8 +7,9 @@ import { createStreamingMarkdownRenderer } from "/stream-markdown.js?v=20260912-
 import { createAiRenderScheduler } from "/ai-render-scheduler.js?v=20260912-stream-render-v2";
 import { createImWorkspace } from "/im.js?v=20260904-im-judge-outcomes-v106";
 import { findAiMention, listAiMentionOptions, mergeAiReferenceScope } from "/ai-mentions.js?v=20260811-user-message-mentions-v1";
-import { applyAiSkillCommand, findAiSkillCommand, listAiSkillOptions } from "/ai-skill-menu.js?v=20260830-ai-skill-slash-menu-v1";
+import { applyAiSkillCommand, findAiSkillCommand, listAiSlashOptions } from "/ai-skill-menu.js?v=20260921-ai-compact-slash-command-v2";
 import {
+  composeRoleplayStoredUserContent,
   emptyRoleplayScenePin,
   normalizeRoleplayScenePin,
   parseRoleplayUserTurn,
@@ -772,6 +774,12 @@ function cancelActiveAiRequest(reason) {
 
 function submitAiComposerPrompt() {
   const tab = activeAiChatTab();
+  if ($("#ai-task").value === "chat" && aiPromptText().trim() === "/compact") {
+    if (aiInteractionBusy()) return toast("当前回复执行中，暂不能压缩上下文", "error");
+    hideAiMentionMenu();
+    void compactAiConversation({ clearComposer: true });
+    return;
+  }
   if (aiRequestManager.hasActive(tab?.id)) {
     if (aiComposerSendMode() === "steer") {
       void sendActiveComposerAsSteer();
@@ -5956,13 +5964,13 @@ function updateAiMentionMenu() {
   aiMentionRange = selection.getRangeAt(0).cloneRange();
   const menu = $("#ai-mention-menu");
   if (skillMatch) {
-    const options = listAiSkillOptions(skillMatch.query);
+    const options = listAiSlashOptions(skillMatch.query);
     aiMentionActiveIndex = -1;
     prompt.removeAttribute("aria-activedescendant");
-    menu.setAttribute("aria-label", "选择写作 Skill");
+    menu.setAttribute("aria-label", "选择 Chat Slash 操作");
     menu.innerHTML = options.length
-      ? options.map((item, index) => `<button id="ai-skill-option-${index}" class="ai-mention-option ai-skill-option" type="button" role="option" aria-selected="false" tabindex="-1" data-ai-skill-name="${esc(item.name)}"><small>Skill</small><span><strong>/${esc(item.name)}</strong><em>${esc(item.label)} · ${esc(item.description)}</em></span></button>`).join("")
-      : '<p class="ai-mention-empty">没有匹配的写作 Skill</p>';
+      ? options.map((item, index) => `<button id="ai-skill-option-${index}" class="ai-mention-option ai-skill-option" type="button" role="option" aria-selected="false" tabindex="-1" data-ai-command-name="${esc(item.name)}"${item.kind === "skill" ? ` data-ai-skill-name="${esc(item.name)}"` : ""}><small>${item.kind === "skill" ? "Skill" : "压缩"}</small><span><strong>/${esc(item.name)}</strong><em>${esc(item.label)} · ${esc(item.description)}</em></span></button>`).join("")
+      : '<p class="ai-mention-empty">没有匹配的 Chat Slash 操作</p>';
     menu.classList.remove("hidden");
     prompt.setAttribute("aria-expanded", "true");
     return;
@@ -6038,6 +6046,15 @@ function selectAiSkill(button) {
   selection?.addRange(range);
   prompt.focus();
   hideAiMentionMenu();
+}
+
+function selectAiSlashCommand(button) {
+  if (button.dataset.aiCommandName === "compact") {
+    hideAiMentionMenu();
+    void compactAiConversation({ clearComposer: true });
+    return;
+  }
+  selectAiSkill(button);
 }
 
 function addSelectedLinesAsCitation() {
@@ -9446,7 +9463,7 @@ async function loadVolumeChapters(volumeId) {
   const workId = state.work.id;
   const generation = workScopedUiGeneration;
   volumeChapterLoadingIds.add(volumeId);
-  renderTree();
+  renderTree([volumeId]);
   const request = (async () => {
     try {
       const chapters = await apiAllPages(`/api/volumes/${encodeURIComponent(volumeId)}/chapters`, 100);
@@ -9456,17 +9473,15 @@ async function loadVolumeChapters(volumeId) {
       volume.chapters = chapters;
       volume.chapterCount = chapters.length;
       loadedVolumeChapterIds.add(volumeId);
-      renderTree();
     } catch (error) {
       if (state.work?.id === workId && generation === workScopedUiGeneration) {
         toast(`加载分卷章节失败：${error.message}`, "error");
-        renderTree();
       }
     } finally {
       if (volumeChapterRequests.get(volumeId) === request) {
         volumeChapterLoadingIds.delete(volumeId);
         volumeChapterRequests.delete(volumeId);
-        if (state.work?.id === workId && generation === workScopedUiGeneration) renderTree();
+        if (state.work?.id === workId && generation === workScopedUiGeneration) renderTree([volumeId]);
       }
     }
   })();
@@ -9490,20 +9505,7 @@ function mergeChapterDirectoryEntry(chapter) {
   if (!state.work || !chapter?.volumeId) return;
   const volume = state.work.volumes.find((item) => item.id === chapter.volumeId);
   if (!volume) return;
-  const directoryEntry = {
-    id: chapter.id,
-    workId: chapter.workId,
-    volumeId: chapter.volumeId,
-    title: chapter.title,
-    chapterType: chapter.chapterType,
-    sortOrder: chapter.sortOrder,
-    wordCount: chapter.wordCount,
-    versionNo: chapter.versionNo,
-    analysisStatus: chapter.analysisStatus,
-    excludedFromAnalysis: chapter.excludedFromAnalysis,
-    createdAt: chapter.createdAt,
-    updatedAt: chapter.updatedAt
-  };
+  const directoryEntry = chapterDirectoryEntry(chapter);
   const chapters = Array.isArray(volume.chapters) ? volume.chapters : [];
   const existingIndex = chapters.findIndex((item) => item.id === chapter.id);
   if (existingIndex >= 0) chapters[existingIndex] = directoryEntry;
@@ -9513,14 +9515,61 @@ function mergeChapterDirectoryEntry(chapter) {
   volume.chapterCount = Math.max(Number(volume.chapterCount ?? 0), chapters.length);
 }
 
-function renderTree() {
+function syncChapterTreeSelection() {
+  const tree = $("#novel-tree");
+  tree.querySelectorAll(".chapter-node.active").forEach((node) => node.classList.remove("active"));
+  const chapter = state.chapter;
+  if (!chapter) return;
+  let button = tree.querySelector(`[data-chapter-id="${CSS.escape(chapter.id)}"]`);
+  if (!button || button.closest(".volume-node")?.classList.contains("is-collapsed")) {
+    renderTree([chapter.volumeId]);
+    button = tree.querySelector(`[data-chapter-id="${CSS.escape(chapter.id)}"]`);
+  }
+  if (!button) return;
+  button.classList.add("active");
+  button.firstElementChild.textContent = chapter.title;
+  button.querySelector("small").textContent = Number(chapter.wordCount ?? 0).toLocaleString("zh-CN");
+  const badge = button.querySelector(".chapter-type-badge")?.textContent ?? "";
+  const chapterType = chapter.chapterType && chapter.chapterType !== "正文" ? chapter.chapterType : "";
+  if (badge !== chapterType) {
+    button.querySelector(".chapter-node-meta").innerHTML = `${chapterType ? `<em class="chapter-type-badge">${esc(chapterType)}</em>` : ""}<small>${Number(chapter.wordCount ?? 0).toLocaleString("zh-CN")}</small>`;
+  }
+}
+
+function syncMovedChapterTree(chapterId, volumeIds) {
+  const tree = $("#novel-tree");
+  const location = findChapterLocation(chapterId);
+  const button = tree.querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`);
+  const target = location && tree.querySelector(`[data-volume-id="${CSS.escape(location.volume.id)}"] .volume-chapters`);
+  if (!button || !target) return renderTree(volumeIds);
+  if (state.collapsedVolumeIds.has(location.volume.id)) button.remove();
+  else {
+    target.querySelector(".entity-history-empty")?.remove();
+    const nextChapter = location.volume.chapters[location.chapterIndex + 1];
+    const nextButton = nextChapter ? target.querySelector(`[data-chapter-id="${CSS.escape(nextChapter.id)}"]`) : null;
+    target.insertBefore(button, nextButton);
+  }
+  for (const volumeId of volumeIds) {
+    const volume = state.work.volumes.find((item) => item.id === volumeId);
+    const node = tree.querySelector(`[data-volume-id="${CSS.escape(volumeId)}"]`);
+    if (!volume || !node) continue;
+    node.querySelector(".volume-chapter-count-number").textContent = String(volume.chapterCount);
+    if (!volume.chapters.length && !state.collapsedVolumeIds.has(volumeId)) {
+      node.querySelector(".volume-chapters").innerHTML = '<p class="entity-history-empty">本卷还没有章节。</p>';
+    }
+  }
+}
+
+function renderTree(volumeIds = null) {
   if (!state.work) return;
   const count = state.work.volumes.reduce((total, volume) => total + Number(volume.chapterCount ?? volume.chapters?.length ?? 0), 0);
   const proseEditable = canEditProse();
   $("#chapter-count").querySelector(".chapter-count-number").textContent = String(count);
   $("#reader-open-button").disabled = !canReadModule("editor") || count === 0;
   $("#novel-tree").classList.remove("empty-copy");
-  $("#novel-tree").innerHTML = state.work.volumes.map((volume) => {
+  const tree = $("#novel-tree");
+  const volumes = volumeIds ? state.work.volumes.filter((volume) => volumeIds.includes(volume.id)) : state.work.volumes;
+  const markup = volumes.map((volume) => {
     const collapsed = state.collapsedVolumeIds.has(volume.id);
     const chapters = Array.isArray(volume.chapters) ? volume.chapters : [];
     const chapterContent = collapsed
@@ -9531,8 +9580,9 @@ function renderTree() {
           ? '<p class="entity-history-empty">展开后加载章节。</p>'
           : chapters.length
             ? chapters.map((chapter) => `
-        <button class="chapter-node ${state.chapter?.id === chapter.id ? "active" : ""}" type="button" data-chapter-id="${esc(chapter.id)}" draggable="${proseEditable ? "true" : "false"}" title="${proseEditable ? "拖拽排序；Alt+方向键排序，Alt+Shift+方向键跨卷" : ""}">
+        <button class="chapter-node ${state.chapter?.id === chapter.id ? "active" : ""}" type="button" data-chapter-id="${esc(chapter.id)}" draggable="false" title="点击打开章节${proseEditable ? "；拖动左侧手柄排序；Alt+方向键排序，Alt+Shift+方向键跨卷" : ""}">
           <span>${esc(chapter.title)}</span><span class="chapter-node-meta">${chapter.chapterType && chapter.chapterType !== "正文" ? `<em class="chapter-type-badge">${esc(chapter.chapterType)}</em>` : ""}<small>${Number(chapter.wordCount ?? 0).toLocaleString("zh-CN")}</small></span>
+          ${proseEditable ? '<span class="chapter-drag-handle" draggable="true" aria-hidden="true" title="拖动排序"><svg viewBox="0 0 12 18" focusable="false"><path d="M4 4h.01M8 4h.01M4 9h.01M8 9h.01M4 14h.01M8 14h.01"></path></svg></span>' : ""}
         </button>`).join("")
             : '<p class="entity-history-empty">本卷还没有章节。</p>';
     return `
@@ -9546,15 +9596,28 @@ function renderTree() {
       ${chapterContent}
       </div>
     </div>`;
-  }).join("");
-  $("#novel-tree").querySelectorAll("[data-volume-toggle]").forEach((button) => {
+  });
+  const roots = [];
+  if (volumeIds) {
+    volumes.forEach((volume, index) => {
+      const node = tree.querySelector(`[data-volume-id="${CSS.escape(volume.id)}"]`);
+      if (!node) return;
+      node.outerHTML = markup[index];
+      roots.push(tree.querySelector(`[data-volume-id="${CSS.escape(volume.id)}"]`));
+    });
+  } else {
+    tree.innerHTML = markup.join("");
+    roots.push(tree);
+  }
+  const renderedNodes = (selector) => roots.flatMap((root) => Array.from(root.querySelectorAll(selector)));
+  renderedNodes("[data-volume-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
       const volumeId = button.dataset.volumeToggle;
       if (state.collapsedVolumeIds.has(volumeId)) {
         state.collapsedVolumeIds.delete(volumeId);
         void loadVolumeChapters(volumeId);
       } else state.collapsedVolumeIds.add(volumeId);
-      renderTree();
+      renderTree([volumeId]);
     });
     button.addEventListener("contextmenu", (event) => {
       if (!canEditProse()) return;
@@ -9582,18 +9645,19 @@ function renderTree() {
       });
     }
   });
-  $("#novel-tree").querySelectorAll("[data-volume-detail]").forEach((button) => {
+  renderedNodes("[data-volume-detail]").forEach((button) => {
     button.addEventListener("click", () => {
       openVolumeDialog(state.work.volumes.find((volume) => volume.id === button.dataset.volumeDetail));
     });
   });
-  $("#novel-tree").querySelectorAll("[data-new-chapter-volume]").forEach((button) => {
+  renderedNodes("[data-new-chapter-volume]").forEach((button) => {
     button.addEventListener("click", () => openChapterDialog(button.dataset.newChapterVolume));
   });
-  $("#novel-tree").querySelectorAll("[data-chapter-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
+  renderedNodes("[data-chapter-id]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      if (event.target.closest(".chapter-drag-handle")) return;
       const chapterId = button.dataset.chapterId;
-      await selectChapter(chapterId);
+      if (!(await selectChapter(chapterId))) return;
       $("#novel-tree").querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`)?.focus();
       if (isMobileViewport()) {
         panelLayout.leftCollapsed = true;
@@ -9614,6 +9678,10 @@ function renderTree() {
     });
     if (proseEditable) {
       button.addEventListener("dragstart", (event) => {
+        if (!canEditProse() || !event.target.closest(".chapter-drag-handle")) {
+          event.preventDefault();
+          return;
+        }
         event.dataTransfer?.setData("text/plain", button.dataset.chapterId);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
         button.classList.add("is-dragging");
@@ -9636,7 +9704,7 @@ function renderTree() {
         const target = findChapterLocation(button.dataset.chapterId);
         const after = button.classList.contains("drop-after");
         button.classList.remove("is-drag-over", "drop-after");
-        if (!chapterId || !target) return;
+        if (!chapterId || !target || chapterId === button.dataset.chapterId) return;
         const targetChapters = target.volume.chapters.filter((chapter) => chapter.id !== chapterId);
         const targetIndex = targetChapters.findIndex((chapter) => chapter.id === button.dataset.chapterId);
         await moveChapterInTree(chapterId, target.volume.id, Math.max(0, targetIndex + (after ? 1 : 0)));
@@ -9789,22 +9857,36 @@ function findChapterLocation(chapterId) {
 
 async function moveChapterInTree(chapterId, volumeId, sortOrder) {
   const location = findChapterLocation(chapterId);
-  if (!location || chapterMovePending) return;
+  if (!location || chapterMovePending || !canEditProse()) return;
   const samePosition = location.volume.id === volumeId && location.chapterIndex === sortOrder;
   if (samePosition) return;
+  const workId = state.work.id;
+  const generation = workScopedUiGeneration;
+  const volumeIds = [...new Set([location.volume.id, volumeId])];
   chapterMovePending = true;
   try {
+    await Promise.all(volumeIds.map((id) => loadVolumeChapters(id)));
+    if (state.work?.id !== workId || generation !== workScopedUiGeneration) return;
+    if (volumeIds.some((id) => !loadedVolumeChapterIds.has(id))) return;
     const moved = await api(`/api/chapters/${encodeURIComponent(chapterId)}/move`, {
       method: "POST",
       body: { volumeId, sortOrder, expectedVersionNo: location.chapter.versionNo }
     });
-    state.work = await api(`/api/works/${encodeURIComponent(state.work.id)}`);
-    if (state.chapter?.id === chapterId) state.chapter = { ...state.chapter, ...moved };
-    renderTree();
-    $("#novel-tree").querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`)?.focus();
+    if (state.work?.id !== workId || generation !== workScopedUiGeneration) return;
+    const affectedVolumeIds = applyChapterDirectoryMove(state.work, moved);
+    const selectedEntry = state.chapter && findChapterLocation(state.chapter.id)?.chapter;
+    if (selectedEntry) {
+      state.chapter = { ...state.chapter, ...selectedEntry };
+      updateChapterPath();
+      updateChapterStats();
+    }
+    syncMovedChapterTree(chapterId, affectedVolumeIds);
+    const focusTarget = $("#novel-tree").querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`)
+      ?? $("#novel-tree").querySelector(`[data-volume-toggle="${CSS.escape(volumeId)}"]`);
+    focusTarget?.focus();
     toast(location.volume.id === volumeId ? "章节顺序已更新" : "章节已移动到目标分卷");
   } catch (error) {
-    toast(error.message, "error");
+    if (state.work?.id === workId && generation === workScopedUiGeneration) toast(error.message, "error");
   } finally {
     chapterMovePending = false;
   }
@@ -9816,7 +9898,7 @@ async function moveChapterByKeyboard(chapterId, direction, crossVolume) {
   if (crossVolume) {
     const targetVolume = state.work.volumes[location.volumeIndex + direction];
     if (!targetVolume) return toast("已经是最前或最后一个分卷");
-    await moveChapterInTree(chapterId, targetVolume.id, direction < 0 ? targetVolume.chapters.length : 0);
+    await moveChapterInTree(chapterId, targetVolume.id, direction < 0 ? Number(targetVolume.chapterCount ?? targetVolume.chapters.length) : 0);
     return;
   }
   const targetIndex = location.chapterIndex + direction;
@@ -10131,10 +10213,7 @@ async function selectChapter(chapterId, { editMode = false } = {}) {
   $("#welcome-view").classList.add("hidden");
   $("#module-view").classList.add("hidden");
   $("#editor-view").classList.remove("hidden");
-  const volume = state.work.volumes.find((item) => item.id === state.chapter.volumeId);
-  const chapterPath = `${volume?.title ?? "正文"} / 保存于 ${formatDateTime(state.chapter.updatedAt)}`;
-  $("#chapter-path").textContent = chapterPath;
-  $("#chapter-path").title = chapterPath;
+  updateChapterPath();
   $("#chapter-title").value = state.chapter.title;
   $("#chapter-content").value = state.chapter.content;
   resetChapterDraftLineIds(state.chapter);
@@ -10149,10 +10228,18 @@ async function selectChapter(chapterId, { editMode = false } = {}) {
   if (!canEditProse()) setSaveState("正文只读");
   else if (chapterEditorReadOnly) setSaveState("阅读模式");
   else setSaveState("已保存");
-  renderTree();
+  syncChapterTreeSelection();
   replacePageRoute({ view: "editor", workId: state.work.id, chapterId: state.chapter.id });
-  await loadChapterForeshadowReminders();
+  void loadChapterForeshadowReminders();
   return true;
+}
+
+function updateChapterPath() {
+  if (!state.work || !state.chapter) return;
+  const volume = state.work.volumes.find((item) => item.id === state.chapter.volumeId);
+  const chapterPath = `${volume?.title ?? "正文"} / 保存于 ${formatDateTime(state.chapter.updatedAt)}`;
+  $("#chapter-path").textContent = chapterPath;
+  $("#chapter-path").title = chapterPath;
 }
 
 function updateChapterStats() {
@@ -15486,6 +15573,43 @@ function setAiContextWarningActionsDisabled(disabled) {
   for (const button of $("#ai-context-warning").querySelectorAll("button")) button.disabled = disabled;
 }
 
+async function compactAiConversation({ clearComposer = false, button = null } = {}) {
+  if (aiInteractionBusy()) return toast("当前回复执行中，暂不能压缩上下文", "error");
+  const requestScope = currentAiRequestScope();
+  const modelId = $("#ai-model").value;
+  if (!requestScope || !modelId) return toast("请先选择章节和模型", "error");
+  const previousLabel = button?.textContent ?? "";
+  setAiContextWarningActionsDisabled(true);
+  if (button) button.textContent = "压缩中";
+  try {
+    const conversationId = await ensureAiConversation();
+    const result = await api(`/api/ai-conversations/${conversationId}/compact`, {
+      method: "POST",
+      body: { modelId, scope: requestScope.scope }
+    });
+    hideAiContextWarning();
+    if (clearComposer) clearAiPromptComposer();
+    $("#ai-prompt").focus();
+    toast(result.changed ? `已整理 ${result.compactedMessageCount} 条较早消息为长期记忆` : "当前没有需要整理的较早消息");
+    setAiContextMeter(result.usage);
+    if (result.changed) {
+      const current = state.aiConversations.find((conversation) => conversation.id === conversationId);
+      if (current) {
+        current.compactedMessageCount = result.compactedMessageCount;
+        current.hasCompactedSummary = true;
+      }
+      renderConversationCompactionDivider(result.compactedMessageCount, current?.messageCount);
+    }
+    return result;
+  } catch (error) {
+    toast(`上下文压缩失败：${error.message}`, "error");
+    return null;
+  } finally {
+    setAiContextWarningActionsDisabled(false);
+    if (button) button.textContent = previousLabel;
+  }
+}
+
 async function loadAiReferences() {
   const workId = state.work?.id;
   if (!workId) return;
@@ -18945,6 +19069,23 @@ async function sendAi() {
   return sendAiWithOptions();
 }
 
+function appendAiPendingRequestMessage(tab) {
+  const message = document.createElement("div");
+  message.className = "assistant-message is-streaming";
+  message.dataset.testid = "ai-stream-message";
+  message.innerHTML = '<div class="message-body" data-testid="ai-stream-content" aria-live="polite" aria-busy="true"></div><div class="message-meta">正在请求……</div>';
+  attachMessageHeading(message, aiAssistantLabel("正在请求", tab.roleplayCharacter), undefined, tab);
+  tab.feed.append(message);
+  scrollAiFeedToBottom(tab.feed);
+  return message;
+}
+
+function prefixAiRequestError(error, prefix) {
+  const failure = error instanceof Error ? error : new Error(String(error ?? "未知错误"));
+  failure.message = `${prefix}：${failure.message}`;
+  return failure;
+}
+
 async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } = {}) {
   if (!state.work) return toast("请先选择作品", "error");
   const tab = activeAiChatTab();
@@ -18994,7 +19135,10 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
       workId: state.work.id,
       conversationId: state.aiConversationId
     }),
-    preserveComposer: Boolean(queuedComposer)
+    preserveComposer: Boolean(queuedComposer),
+    optimisticUserMessage: null,
+    pendingAssistantMessage: null,
+    requestStartedAt: Date.now()
   };
   if (retry?.userMessageId) {
     requestHolder.snapshot = aiRequestManager.bind(requestHolder.snapshot, { userMessageId: retry.userMessageId });
@@ -19002,6 +19146,33 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
   setAiChatTabStatus(tab, "streaming");
   syncAiRequestControls();
   scrollAiFeedToBottom(tab.feed, { force: true });
+  if (!retry) {
+    const optimisticContent = selectedTaskType === "roleplay"
+      ? composeRoleplayStoredUserContent(sceneDirection, instruction)
+      : instruction;
+    requestHolder.optimisticUserMessage = appendMessage(
+      "user",
+      optimisticContent,
+      citations,
+      null,
+      {
+        ...(requestScope.scope.characterIds?.length ? { mentionCharacterIds: requestScope.scope.characterIds } : {}),
+        ...(requestScope.scope.settingIds?.length ? { mentionSettingIds: requestScope.scope.settingIds } : {}),
+        ...(requestScope.scope.chapterIds?.length ? { mentionChapterIds: requestScope.scope.chapterIds } : {}),
+        ...(requestScope.scope.includeSettingInfo === true ? { mentionContextSettingIds: ["include-setting-info"] } : {}),
+        ...(requestComposerSnapshot.images.length ? { chatImageAttachmentIds: aiChatImageAttachmentIds(requestComposerSnapshot.images) } : {})
+      },
+      null,
+      { tab }
+    );
+    requestHolder.optimisticUserMessage.dataset.status = "pending";
+    requestHolder.optimisticUserMessage.setAttribute("aria-label", "消息正在发送");
+    if (!requestHolder.preserveComposer) {
+      clearAiChatTabComposer(tab);
+      if (isActiveAiChatTab(tab)) clearAiPromptComposer({ collapseScenePanel: Boolean(sceneDirection) });
+    }
+    requestHolder.pendingAssistantMessage = appendAiPendingRequestMessage(tab);
+  }
   let shouldFlushQueuedPrompt = false;
   try {
     try {
@@ -19010,21 +19181,31 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
     } catch (error) {
       if (isAiRequestCancellation(error, requestHolder.snapshot) || !aiRequestTargetsCurrentState(requestHolder.snapshot)) throw error;
       setAiChatTabStatus(tab, "error");
-      return toast(`创作助手加载失败：${error.message}`, "error");
+      const failure = prefixAiRequestError(error, "创作助手加载失败");
+      if (!requestHolder.optimisticUserMessage) return toast(failure.message, "error");
+      throw failure;
     }
     assertAiRequestCurrent(requestHolder.snapshot);
     const modelId = tab.selectedModelId || state.models[0]?.id || (isActiveAiChatTab(tab) ? $("#ai-model").value : "");
-    if (!modelId) return toast("请先在 AI 管理中配置并选择模型", "error");
+    if (!modelId) {
+      const error = new Error("请先在 AI 管理中配置并选择模型");
+      if (!requestHolder.optimisticUserMessage) return toast(error.message, "error");
+      throw error;
+    }
     tab.selectedModelId = modelId;
     const imageAttachmentIds = aiChatImageAttachmentIds(requestComposerSnapshot.images);
     if (imageAttachmentIds.length > 0 && !state.models.find((model) => model.id === modelId)?.multimodalEnabled) {
-      return toast("当前选择的模型不是多模态模型，无法发送图片附件", "error");
+      const error = new Error("当前选择的模型不是多模态模型，无法发送图片附件");
+      if (!requestHolder.optimisticUserMessage) return toast(error.message, "error");
+      throw error;
     }
     try {
       await prepareAiRequestConversation(requestHolder, selectedTaskType, requestScope.conversationScope);
     } catch (error) {
       if (isAiRequestCancellation(error, requestHolder.snapshot) || !aiRequestTargetsCurrentState(requestHolder.snapshot)) throw error;
-      return toast(`对话配置锁定失败：${error.message}`, "error");
+      const failure = prefixAiRequestError(error, "对话配置锁定失败");
+      if (!requestHolder.optimisticUserMessage) return toast(failure.message, "error");
+      throw failure;
     }
     setAiChatTabStatus(tab, "streaming");
     if (retry?.message?.isConnected) retry.message.remove();
@@ -19045,7 +19226,12 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
       ...(ignoreContextWarning ? { ignoreContextWarning: true } : {})
     }, retry), createAiIdempotencyKey());
     const streamedRequest = assertAiRequestCurrent(requestHolder.snapshot);
-    if (streamed.action === "warn") return;
+    if (streamed.action === "warn") {
+      requestHolder.optimisticUserMessage?.remove();
+      setAiChatTabComposerSnapshot(tab, requestComposerSnapshot);
+      if (isActiveAiChatTab(tab) && !requestHolder.preserveComposer) restoreAiPromptComposer(requestComposerSnapshot);
+      return;
+    }
     assistantContent = streamed.content;
     shouldFlushQueuedPrompt = true;
     assistantMessage = streamed.message;
@@ -19086,6 +19272,7 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
     }
   } catch (error) {
     const request = requestHolder.snapshot;
+    if (!error?.streamInterruption) requestHolder.pendingAssistantMessage?.remove();
     if (isAiRequestCancellation(error, request) || !aiRequestTargetsCurrentState(request)) {
       const persistedInterruption = await persistAiRequestInterruption(request, error?.streamInterruption);
       const userStoppedCurrentReply = request.signal.reason instanceof Error
@@ -19104,6 +19291,7 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
       return;
     }
     if (error?.code === "AI_CONVERSATION_RESPONSE_IN_PROGRESS") {
+      requestHolder.optimisticUserMessage?.remove();
       setAiChatTabComposerSnapshot(tab, requestComposerSnapshot);
       if (isActiveAiChatTab(tab)) {
         if (retry) restoreAiPromptComposer(requestComposerSnapshot);
@@ -19123,6 +19311,10 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
       return;
     }
     setAiChatTabStatus(tab, "error");
+    if (requestHolder.optimisticUserMessage?.dataset.status === "pending") {
+      requestHolder.optimisticUserMessage.dataset.status = "failed";
+      requestHolder.optimisticUserMessage.setAttribute("aria-label", "消息发送失败");
+    }
     const interruption = error?.streamInterruption;
     if (interruption?.content) {
       try {
@@ -19209,14 +19401,21 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
   const tab = aiChatTabForRequest(requestHolder.snapshot);
   if (!tab) throw createAiRequestAbortError("Agent 对话页签已关闭");
   const feed = tab.feed;
-  let message = document.createElement("div");
+  let message = requestHolder.pendingAssistantMessage?.isConnected
+    ? requestHolder.pendingAssistantMessage
+    : document.createElement("div");
   message.className = "assistant-message is-streaming";
   message.dataset.testid = "ai-stream-message";
-  const streamConnectionStartedAt = Date.now();
-  message.innerHTML = '<div class="message-body" data-testid="ai-stream-content" aria-live="polite" aria-busy="true"></div><div class="message-meta">正在连接模型流…… <span class="ai-stream-connection-seconds" data-testid="ai-stream-connection-seconds"></span> 秒</div>';
+  const streamConnectionStartedAt = requestHolder.requestStartedAt ?? Date.now();
+  if (!message.querySelector(".message-body")) {
+    message.innerHTML = '<div class="message-body" data-testid="ai-stream-content" aria-live="polite" aria-busy="true"></div><div class="message-meta"></div>';
+  }
   let content = message.querySelector(".message-body");
   let meta = message.querySelector(".message-meta");
-  const connectionSeconds = message.querySelector(".ai-stream-connection-seconds");
+  const connectionSeconds = document.createElement("span");
+  connectionSeconds.className = "ai-stream-connection-seconds";
+  connectionSeconds.dataset.testid = "ai-stream-connection-seconds";
+  meta.replaceChildren("正在请求…… ", connectionSeconds, " 秒");
   const renderStreamConnectionElapsed = () => {
     const elapsedSeconds = Math.max(0, Math.floor((Date.now() - streamConnectionStartedAt) / 1000));
     connectionSeconds.textContent = String(elapsedSeconds);
@@ -19230,11 +19429,12 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
   };
   const streamConnectionEstablishedEvents = new Set(["continuation", "delta", "process_step", "tool_call", "context_compacted", "complete", "request_status", "error"]);
   const streamSpeedController = createStreamTypewriterSpeedController();
-  let messageMounted = false;
+  let streamConnectionEstablished = false;
+  let messageMounted = message.isConnected;
   const mountAssistantMessage = () => {
     if (messageMounted) return true;
     if (!aiRequestTargetsCurrentState(requestHolder.snapshot)) return false;
-    attachMessageHeading(message, aiAssistantLabel("正在生成", tab.roleplayCharacter), undefined, tab);
+    attachMessageHeading(message, aiAssistantLabel(streamConnectionEstablished ? "正在生成" : "正在请求", tab.roleplayCharacter), undefined, tab);
     feed.append(message);
     messageMounted = true;
     scrollAiFeedToBottom(feed);
@@ -19356,7 +19556,14 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
     let streamError = null;
     const consume = async (eventName, payload) => {
       assertAiRequestCurrent(requestHolder.snapshot);
-      if (streamConnectionEstablishedEvents.has(eventName) || eventName === "steer") stopStreamConnectionTimer();
+      if (streamConnectionEstablishedEvents.has(eventName) || eventName === "steer") {
+        stopStreamConnectionTimer();
+        streamConnectionEstablished = true;
+        const headingRole = messageMounted ? message.querySelector(".message-heading > span") : null;
+        if (headingRole && !["complete", "request_status", "error"].includes(eventName)) {
+          headingRole.textContent = aiAssistantLabel("正在生成", tab.roleplayCharacter);
+        }
+      }
       if (eventName === "continuation") {
         if (String(payload.conversationId ?? "") !== requestHolder.snapshot.conversationId) throw new Error("流式续接返回了其他对话");
         toolCalls = Array.isArray(payload.toolCalls) ? payload.toolCalls : [];
@@ -19407,10 +19614,19 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
           tab.selectedModelId = lockedModelId;
           tab.promptSent = true;
           if (!requestHolder.preserveComposer) clearAiChatTabComposer(tab);
-          const existingUserMessage = [...tab.feed.querySelectorAll(".user-message[data-message-id]")]
+          let existingUserMessage = [...tab.feed.querySelectorAll(".user-message[data-message-id]")]
             .find((candidate) => candidate.dataset.messageId === String(persistedUserMessage.id));
-          if (!existingUserMessage) {
-            appendMessage("user", persistedUserMessage.content, persistedUserMessage.citations, persistedUserMessage.createdAt, persistedUserMessage.metadata, persistedUserMessage.id, { tab });
+          if (requestHolder.optimisticUserMessage?.isConnected) {
+            if (existingUserMessage && existingUserMessage !== requestHolder.optimisticUserMessage) {
+              requestHolder.optimisticUserMessage.remove();
+            } else {
+              const confirmedUserMessage = appendMessage("user", persistedUserMessage.content, persistedUserMessage.citations, persistedUserMessage.createdAt, persistedUserMessage.metadata, persistedUserMessage.id, { tab });
+              requestHolder.optimisticUserMessage.replaceWith(confirmedUserMessage);
+              requestHolder.optimisticUserMessage = confirmedUserMessage;
+              existingUserMessage = confirmedUserMessage;
+            }
+          } else if (!existingUserMessage) {
+            existingUserMessage = appendMessage("user", persistedUserMessage.content, persistedUserMessage.citations, persistedUserMessage.createdAt, persistedUserMessage.metadata, persistedUserMessage.id, { tab });
           }
           if (isActiveAiChatTab(tab)) {
             state.aiConversationModelId = lockedModelId;
@@ -19520,6 +19736,7 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
     assertAiRequestCurrent(requestHolder.snapshot);
     if (streamError) throw streamError;
     assertAiStreamCompleted(streamCompleted);
+    if (warningOnly && messageMounted) message.remove();
     return { action: warningOnly ? "warn" : contextAction, content: streamedText, message, metadata: generatedMetadata, messageId: persistedMessageId, createdAt: persistedMessageCreatedAt, conversationTitle, userMessage: persistedUserMessage, question };
   } catch (error) {
     const streamFailure = error instanceof Error ? error : new Error(String(error ?? "AI 流式调用失败"));
@@ -21683,8 +21900,8 @@ $("#ai-scope").addEventListener("change", (event) => {
   setAiContextMeter(null);
 });
 $("#ai-mention-menu").addEventListener("click", (event) => {
-  const skillButton = event.target.closest("[data-ai-skill-name]");
-  if (skillButton) return selectAiSkill(skillButton);
+  const commandButton = event.target.closest("[data-ai-command-name]");
+  if (commandButton) return selectAiSlashCommand(commandButton);
   const button = event.target.closest("[data-ai-reference-id]");
   if (button) selectAiMention(button);
 });
@@ -21983,36 +22200,7 @@ $("#ai-new-conversation").addEventListener("click", async () => {
   }
 });
 $("#ai-context-compact").addEventListener("click", async () => {
-  const requestScope = currentAiRequestScope();
-  const modelId = $("#ai-model").value;
-  if (!requestScope || !modelId) return toast("请先选择章节和模型", "error");
-  const button = $("#ai-context-compact");
-  setAiContextWarningActionsDisabled(true);
-  button.textContent = "压缩中";
-  try {
-    const conversationId = await ensureAiConversation();
-    const result = await api(`/api/ai-conversations/${conversationId}/compact`, {
-      method: "POST",
-      body: { modelId, scope: requestScope.scope }
-    });
-    hideAiContextWarning();
-    $("#ai-prompt").focus();
-    toast(result.changed ? `已整理 ${result.compactedMessageCount} 条较早消息为长期记忆` : "当前没有需要整理的较早消息");
-    setAiContextMeter(result.usage);
-    if (result.changed) {
-      const current = state.aiConversations.find((conversation) => conversation.id === conversationId);
-      if (current) {
-        current.compactedMessageCount = result.compactedMessageCount;
-        current.hasCompactedSummary = true;
-      }
-      renderConversationCompactionDivider(result.compactedMessageCount, current?.messageCount);
-    }
-  } catch (error) {
-    toast(`上下文压缩失败：${error.message}`, "error");
-  } finally {
-    setAiContextWarningActionsDisabled(false);
-    button.textContent = "压缩";
-  }
+  void compactAiConversation({ button: $("#ai-context-compact") });
 });
 $("#ai-context-new-conversation").addEventListener("click", async () => {
   setAiContextWarningActionsDisabled(true);
@@ -22285,7 +22473,7 @@ $("#ai-prompt").addEventListener("keydown", (event) => {
       const activeOption = $("#ai-mention-menu").querySelector('[role="option"][aria-selected="true"]');
       if (activeOption) {
         event.preventDefault();
-        if (activeOption.dataset.aiSkillName) selectAiSkill(activeOption);
+        if (activeOption.dataset.aiCommandName) selectAiSlashCommand(activeOption);
         else selectAiMention(activeOption);
         return;
       }
