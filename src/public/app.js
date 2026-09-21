@@ -6,7 +6,7 @@ import { createStreamingMarkdownRenderer } from "/stream-markdown.js?v=20260912-
 import { createAiRenderScheduler } from "/ai-render-scheduler.js?v=20260912-stream-render-v2";
 import { createImWorkspace } from "/im.js?v=20260904-im-judge-outcomes-v106";
 import { findAiMention, listAiMentionOptions, mergeAiReferenceScope } from "/ai-mentions.js?v=20260811-user-message-mentions-v1";
-import { applyAiSkillCommand, findAiSkillCommand, listAiSkillOptions } from "/ai-skill-menu.js?v=20260830-ai-skill-slash-menu-v1";
+import { applyAiSkillCommand, findAiSkillCommand, listAiSlashOptions } from "/ai-skill-menu.js?v=20260921-ai-compact-slash-command-v2";
 import {
   emptyRoleplayScenePin,
   normalizeRoleplayScenePin,
@@ -772,6 +772,12 @@ function cancelActiveAiRequest(reason) {
 
 function submitAiComposerPrompt() {
   const tab = activeAiChatTab();
+  if ($("#ai-task").value === "chat" && aiPromptText().trim() === "/compact") {
+    if (aiInteractionBusy()) return toast("当前回复执行中，暂不能压缩上下文", "error");
+    hideAiMentionMenu();
+    void compactAiConversation({ clearComposer: true });
+    return;
+  }
   if (aiRequestManager.hasActive(tab?.id)) {
     if (aiComposerSendMode() === "steer") {
       void sendActiveComposerAsSteer();
@@ -5956,13 +5962,13 @@ function updateAiMentionMenu() {
   aiMentionRange = selection.getRangeAt(0).cloneRange();
   const menu = $("#ai-mention-menu");
   if (skillMatch) {
-    const options = listAiSkillOptions(skillMatch.query);
+    const options = listAiSlashOptions(skillMatch.query);
     aiMentionActiveIndex = -1;
     prompt.removeAttribute("aria-activedescendant");
-    menu.setAttribute("aria-label", "选择写作 Skill");
+    menu.setAttribute("aria-label", "选择 Chat Slash 操作");
     menu.innerHTML = options.length
-      ? options.map((item, index) => `<button id="ai-skill-option-${index}" class="ai-mention-option ai-skill-option" type="button" role="option" aria-selected="false" tabindex="-1" data-ai-skill-name="${esc(item.name)}"><small>Skill</small><span><strong>/${esc(item.name)}</strong><em>${esc(item.label)} · ${esc(item.description)}</em></span></button>`).join("")
-      : '<p class="ai-mention-empty">没有匹配的写作 Skill</p>';
+      ? options.map((item, index) => `<button id="ai-skill-option-${index}" class="ai-mention-option ai-skill-option" type="button" role="option" aria-selected="false" tabindex="-1" data-ai-command-name="${esc(item.name)}"${item.kind === "skill" ? ` data-ai-skill-name="${esc(item.name)}"` : ""}><small>${item.kind === "skill" ? "Skill" : "压缩"}</small><span><strong>/${esc(item.name)}</strong><em>${esc(item.label)} · ${esc(item.description)}</em></span></button>`).join("")
+      : '<p class="ai-mention-empty">没有匹配的 Chat Slash 操作</p>';
     menu.classList.remove("hidden");
     prompt.setAttribute("aria-expanded", "true");
     return;
@@ -6038,6 +6044,15 @@ function selectAiSkill(button) {
   selection?.addRange(range);
   prompt.focus();
   hideAiMentionMenu();
+}
+
+function selectAiSlashCommand(button) {
+  if (button.dataset.aiCommandName === "compact") {
+    hideAiMentionMenu();
+    void compactAiConversation({ clearComposer: true });
+    return;
+  }
+  selectAiSkill(button);
 }
 
 function addSelectedLinesAsCitation() {
@@ -15486,6 +15501,43 @@ function setAiContextWarningActionsDisabled(disabled) {
   for (const button of $("#ai-context-warning").querySelectorAll("button")) button.disabled = disabled;
 }
 
+async function compactAiConversation({ clearComposer = false, button = null } = {}) {
+  if (aiInteractionBusy()) return toast("当前回复执行中，暂不能压缩上下文", "error");
+  const requestScope = currentAiRequestScope();
+  const modelId = $("#ai-model").value;
+  if (!requestScope || !modelId) return toast("请先选择章节和模型", "error");
+  const previousLabel = button?.textContent ?? "";
+  setAiContextWarningActionsDisabled(true);
+  if (button) button.textContent = "压缩中";
+  try {
+    const conversationId = await ensureAiConversation();
+    const result = await api(`/api/ai-conversations/${conversationId}/compact`, {
+      method: "POST",
+      body: { modelId, scope: requestScope.scope }
+    });
+    hideAiContextWarning();
+    if (clearComposer) clearAiPromptComposer();
+    $("#ai-prompt").focus();
+    toast(result.changed ? `已整理 ${result.compactedMessageCount} 条较早消息为长期记忆` : "当前没有需要整理的较早消息");
+    setAiContextMeter(result.usage);
+    if (result.changed) {
+      const current = state.aiConversations.find((conversation) => conversation.id === conversationId);
+      if (current) {
+        current.compactedMessageCount = result.compactedMessageCount;
+        current.hasCompactedSummary = true;
+      }
+      renderConversationCompactionDivider(result.compactedMessageCount, current?.messageCount);
+    }
+    return result;
+  } catch (error) {
+    toast(`上下文压缩失败：${error.message}`, "error");
+    return null;
+  } finally {
+    setAiContextWarningActionsDisabled(false);
+    if (button) button.textContent = previousLabel;
+  }
+}
+
 async function loadAiReferences() {
   const workId = state.work?.id;
   if (!workId) return;
@@ -21683,8 +21735,8 @@ $("#ai-scope").addEventListener("change", (event) => {
   setAiContextMeter(null);
 });
 $("#ai-mention-menu").addEventListener("click", (event) => {
-  const skillButton = event.target.closest("[data-ai-skill-name]");
-  if (skillButton) return selectAiSkill(skillButton);
+  const commandButton = event.target.closest("[data-ai-command-name]");
+  if (commandButton) return selectAiSlashCommand(commandButton);
   const button = event.target.closest("[data-ai-reference-id]");
   if (button) selectAiMention(button);
 });
@@ -21983,36 +22035,7 @@ $("#ai-new-conversation").addEventListener("click", async () => {
   }
 });
 $("#ai-context-compact").addEventListener("click", async () => {
-  const requestScope = currentAiRequestScope();
-  const modelId = $("#ai-model").value;
-  if (!requestScope || !modelId) return toast("请先选择章节和模型", "error");
-  const button = $("#ai-context-compact");
-  setAiContextWarningActionsDisabled(true);
-  button.textContent = "压缩中";
-  try {
-    const conversationId = await ensureAiConversation();
-    const result = await api(`/api/ai-conversations/${conversationId}/compact`, {
-      method: "POST",
-      body: { modelId, scope: requestScope.scope }
-    });
-    hideAiContextWarning();
-    $("#ai-prompt").focus();
-    toast(result.changed ? `已整理 ${result.compactedMessageCount} 条较早消息为长期记忆` : "当前没有需要整理的较早消息");
-    setAiContextMeter(result.usage);
-    if (result.changed) {
-      const current = state.aiConversations.find((conversation) => conversation.id === conversationId);
-      if (current) {
-        current.compactedMessageCount = result.compactedMessageCount;
-        current.hasCompactedSummary = true;
-      }
-      renderConversationCompactionDivider(result.compactedMessageCount, current?.messageCount);
-    }
-  } catch (error) {
-    toast(`上下文压缩失败：${error.message}`, "error");
-  } finally {
-    setAiContextWarningActionsDisabled(false);
-    button.textContent = "压缩";
-  }
+  void compactAiConversation({ button: $("#ai-context-compact") });
 });
 $("#ai-context-new-conversation").addEventListener("click", async () => {
   setAiContextWarningActionsDisabled(true);
@@ -22285,7 +22308,7 @@ $("#ai-prompt").addEventListener("keydown", (event) => {
       const activeOption = $("#ai-mention-menu").querySelector('[role="option"][aria-selected="true"]');
       if (activeOption) {
         event.preventDefault();
-        if (activeOption.dataset.aiSkillName) selectAiSkill(activeOption);
+        if (activeOption.dataset.aiCommandName) selectAiSlashCommand(activeOption);
         else selectAiMention(activeOption);
         return;
       }
