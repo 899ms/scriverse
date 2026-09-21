@@ -9564,8 +9564,9 @@ function renderTree(volumeIds = null) {
           ? '<p class="entity-history-empty">展开后加载章节。</p>'
           : chapters.length
             ? chapters.map((chapter) => `
-        <button class="chapter-node ${state.chapter?.id === chapter.id ? "active" : ""}" type="button" data-chapter-id="${esc(chapter.id)}" draggable="${proseEditable ? "true" : "false"}" title="${proseEditable ? "拖拽排序；Alt+方向键排序，Alt+Shift+方向键跨卷" : ""}">
+        <button class="chapter-node ${state.chapter?.id === chapter.id ? "active" : ""}" type="button" data-chapter-id="${esc(chapter.id)}" draggable="false" title="点击打开章节${proseEditable ? "；拖动左侧手柄排序；Alt+方向键排序，Alt+Shift+方向键跨卷" : ""}">
           <span>${esc(chapter.title)}</span><span class="chapter-node-meta">${chapter.chapterType && chapter.chapterType !== "正文" ? `<em class="chapter-type-badge">${esc(chapter.chapterType)}</em>` : ""}<small>${Number(chapter.wordCount ?? 0).toLocaleString("zh-CN")}</small></span>
+          ${proseEditable ? '<span class="chapter-drag-handle" draggable="true" aria-hidden="true" title="拖动排序"><svg viewBox="0 0 12 18" focusable="false"><path d="M4 4h.01M8 4h.01M4 9h.01M8 9h.01M4 14h.01M8 14h.01"></path></svg></span>' : ""}
         </button>`).join("")
             : '<p class="entity-history-empty">本卷还没有章节。</p>';
     return `
@@ -9637,7 +9638,8 @@ function renderTree(volumeIds = null) {
     button.addEventListener("click", () => openChapterDialog(button.dataset.newChapterVolume));
   });
   renderedNodes("[data-chapter-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", async (event) => {
+      if (event.target.closest(".chapter-drag-handle")) return;
       const chapterId = button.dataset.chapterId;
       if (!(await selectChapter(chapterId))) return;
       $("#novel-tree").querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`)?.focus();
@@ -9660,6 +9662,10 @@ function renderTree(volumeIds = null) {
     });
     if (proseEditable) {
       button.addEventListener("dragstart", (event) => {
+        if (!canEditProse() || !event.target.closest(".chapter-drag-handle")) {
+          event.preventDefault();
+          return;
+        }
         event.dataTransfer?.setData("text/plain", button.dataset.chapterId);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
         button.classList.add("is-dragging");
