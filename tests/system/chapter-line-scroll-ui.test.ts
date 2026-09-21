@@ -21,7 +21,7 @@ describe("正文行号绑定滚动界面", () => {
     expect(application).toContain("chapterLineNumberLayerTransform()");
     expect(application).toContain("transferNestedEditorScroll(input, scroller)");
     expect(styles).toContain(".chapter-editor-scroll { position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr); flex: 1 1 auto; width: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }");
-    expect(styles).toContain(".chapter-line-numbers { position: relative; z-index: 2; grid-column: 1; grid-row: 1; min-height: 0; overflow: hidden;");
+    expect(styles).toContain(".chapter-line-numbers { position: relative; z-index: 2; grid-column: 1; grid-row: 1; min-height: 0; overflow: clip; overflow-clip-margin: 12px;");
     expect(styles).toContain(".chapter-content { position: relative; z-index: 1; grid-column: 2; grid-row: 1; resize: none; width: 100%; height: auto; min-height: 100%; margin: 0; padding: 32px 36px 72px;");
     expect(styles).toContain("overflow-wrap: break-word; overflow: hidden; }");
     expect(styles).toContain("#chapter-line-numbers-inner { position: absolute; top: 32px; left: 0; right: 0; }");
