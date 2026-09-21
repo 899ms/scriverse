@@ -15,6 +15,7 @@ import { AI_PROVIDER_PROTOCOL_OPTIONS, AI_PROVIDER_PROTOCOLS, AI_THINKING_TYPES,
 import { MAX_AI_ANALYSIS_TIMEOUT_SECONDS, MIN_AI_ANALYSIS_TIMEOUT_SECONDS } from "./ai-analysis-timeout.js";
 import { aiConversationExportContentDisposition, exportAiConversationMarkdown } from "./ai-conversation-export.js";
 import { DEFAULT_AI_CHAT_TAB_LIMIT } from "./ai-chat-tab-limit.js";
+import { DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH } from "./chapter-annotation-note.js";
 import type { AiRetryPolicy } from "./ai-retry.js";
 import {
   MAX_AI_STREAM_IDLE_TIMEOUT_SECONDS,
@@ -34,6 +35,7 @@ import {
   CHARACTER_EXTRACTION_MAX_NAME_LENGTH,
   CHARACTER_EXTRACTION_MAX_SPECIES_LENGTH
 } from "./character-extraction.js";
+import { characterAttributesInputSchema, characterStateInputSchema } from "./character-structured-fields.js";
 import {
   AiWritePlanManager,
   AI_USER_QUESTION_STATUSES,
@@ -378,9 +380,9 @@ const characterSchema = z.object({
   aliases: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
   raceId: identifier.nullable().optional(),
   organizationIds: z.array(identifier).max(100).optional(),
-  attributes: jsonObject.optional(),
+  attributes: characterAttributesInputSchema.optional(),
   profile: jsonObject.optional(),
-  currentState: jsonObject.optional(),
+  currentState: characterStateInputSchema.optional(),
   lockedFields: optionalStrings,
   firstChapterId: identifier.nullable().optional()
 }).strict();
@@ -1069,6 +1071,8 @@ export type RuntimeOptions = {
   liteLlmPriceCache?: LiteLlmPriceCache;
   /** 同一浏览器工作区允许同时打开的 Agent 对话数量。 */
   aiChatTabLimit?: number;
+  /** 正文评论和待办内容的最大字符数。 */
+  chapterAnnotationNoteMaxLength?: number;
   /** 测试与嵌入运行时可替换 S3 客户端及数据库快照来源。 */
   backupOptions?: S3BackupManagerOptions;
 };
@@ -1492,6 +1496,7 @@ function redactVersionSnapshots(
 export function createRuntime(options: RuntimeOptions): Runtime {
   const uploadLimits = options.uploadLimits ?? DEFAULT_IMAGE_UPLOAD_LIMITS;
   const aiChatTabLimit = options.aiChatTabLimit ?? DEFAULT_AI_CHAT_TAB_LIMIT;
+  const chapterAnnotationNoteMaxLength = options.chapterAnnotationNoteMaxLength ?? DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH;
   const requestedAiStreamHeartbeatIntervalMs = Number(options.aiStreamHeartbeatIntervalMs);
   const aiStreamHeartbeatIntervalMs = Number.isFinite(requestedAiStreamHeartbeatIntervalMs)
     ? Math.max(1, Math.trunc(requestedAiStreamHeartbeatIntervalMs))
@@ -1688,7 +1693,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     auth,
     resolveAnalysisTask: (workId, input) => ai.resolveTaskInput(workId, input),
     startAnalysisTask: (workId, input) => store.createTask(workId, input)
-  });
+  }, { chapterAnnotationNoteMaxLength });
   ai.attachWritePlanManager(aiWritePlanManager);
   const app = express();
   enforceCaseInsensitiveRouting(app);
@@ -1739,6 +1744,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
       protocols: [...AI_PROVIDER_PROTOCOLS],
       development: options.developmentServer === true,
       aiChatTabLimit,
+      chapterAnnotationNoteMaxLength,
       uploadLimits
     });
   });
@@ -2713,12 +2719,12 @@ export function createRuntime(options: RuntimeOptions): Runtime {
       kind: z.enum(["note", "todo"]),
       startLine: z.number().int().positive(),
       endLine: z.number().int().positive(),
-      note: z.string().trim().min(1).max(2000)
+      note: z.string().trim().min(1).max(chapterAnnotationNoteMaxLength)
     }).strict().refine((value) => value.endLine >= value.startLine, { message: "结束行不能早于开始行", path: ["endLine"] }), request.body);
     data(response, store.createChapterAnnotation(request.params.chapterId, input), 201);
   });
   app.patch("/api/chapter-annotations/:annotationId", (request, response) => {
-    const input = parse(z.object({ note: z.string().trim().min(1).max(2000).optional(), status: z.enum(["open", "resolved"]).optional(), expectedVersionNo: expectedVersionNoSchema }).strict().refine((value) => value.note !== undefined || value.status !== undefined, { message: "至少需要修改一项" }), request.body);
+    const input = parse(z.object({ note: z.string().trim().min(1).max(chapterAnnotationNoteMaxLength).optional(), status: z.enum(["open", "resolved"]).optional(), expectedVersionNo: expectedVersionNoSchema }).strict().refine((value) => value.note !== undefined || value.status !== undefined, { message: "至少需要修改一项" }), request.body);
     const { expectedVersionNo, ...update } = input;
     data(response, store.updateChapterAnnotation(request.params.annotationId, update, expectedVersionNo));
   });
@@ -3844,6 +3850,19 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     const permissions = requestPermissions(request, String(conversation.workId));
     data(response, redactAiConversationMessage(message, permissions), 201);
   });
+  app.post("/api/ai-conversations/:conversationId/steer", (request, response) => {
+    const input = parse(z.object({
+      content: nonEmpty.max(100_000)
+    }).strict(), request.body ?? {});
+    const conversation = store.getAiConversationSummary(request.params.conversationId);
+    const workId = String(conversation.workId);
+    const permissions = requestPermissions(request, workId);
+    if (!canWriteWorkModule(permissions, "ai-chat")) {
+      throw new AppError(403, "WORK_MODULE_WRITE_DENIED", "你没有使用创作助手的权限");
+    }
+    const entry = ai.enqueueSteer(workId, request.params.conversationId, input.content);
+    data(response, { ...entry, status: "pending" }, 202);
+  });
   app.post("/api/ai-conversations/:conversationId/context/prepare", async (request, response) => {
     const input = parse(z.object({
       modelId: identifier.optional(),
@@ -4340,6 +4359,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
       touchStreamLease();
       if (!response.writableEnded && !response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
     };
+    let releaseSteer = (): void => undefined;
     try {
       if (!existingRequest) {
         preparedChatImageAttachments = await ai.prepareChatImageAttachments(
@@ -4462,6 +4482,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
           questionId: pendingQuestion.id
         });
       }
+      releaseSteer = ai.steerMailbox.begin(conversationId);
       const result = await ai.createStreamingChat({
         workId: request.params.workId,
         instruction: resolvedInstruction,
@@ -4473,6 +4494,10 @@ export function createRuntime(options: RuntimeOptions): Runtime {
         onToolCall: (toolCall, round) => sendEvent("tool_call", { ...toolCall, round }),
         onProcessStep: (step) => sendEvent("process_step", step),
         onContextCompacted: (event) => sendEvent("context_compacted", event),
+        onSteer: (event) => sendEvent("steer", {
+          message: redactAiConversationMessage(event.message, permissions),
+          applied: true
+        }),
         conversationId,
         excludeConversationMessageId: currentMessageId,
         ...(currentMessageId ? { assistantMessageRequestId: `assistant:${currentMessageId}` } : {}),
@@ -4526,6 +4551,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
         sendEvent("error", publicAiStreamError(error));
       }
     } finally {
+      releaseSteer();
       stopStreamHeartbeat();
       if (streamRequestId && !streamRequestFinished && !stopping) {
         store.finishAiConversationStreamRequest(streamRequestId, "cancelled", "stream_closed");

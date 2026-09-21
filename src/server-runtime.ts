@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { basename, join } from "node:path";
 import { createRuntime, type Runtime } from "./app.js";
 import { resolveAiChatTabLimit } from "./ai-chat-tab-limit.js";
+import { resolveChapterAnnotationNoteMaxLength } from "./chapter-annotation-note.js";
 import { resolveAiRetryPolicy } from "./ai-retry.js";
 import { AI_STREAM_IDLE_TIMEOUT_SECONDS_ENV, resolveAiStreamIdleTimeoutMs } from "./ai-stream-timeout.js";
 import { DATABASE_SCHEMA_VERSION, readDatabaseSchemaVersion } from "./database.js";
@@ -254,6 +255,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Run
       releaseCheckTimeoutMs: resolveReleaseCheckTimeoutMs(options.env.APP_UPDATE_CHECK_TIMEOUT_SECONDS),
       releaseCheckRetries: resolveReleaseCheckRetries(options.env.APP_UPDATE_CHECK_RETRIES),
       aiChatTabLimit: resolveAiChatTabLimit(options.env),
+      chapterAnnotationNoteMaxLength: resolveChapterAnnotationNoteMaxLength(options.env),
       aiRetryPolicy: resolveAiRetryPolicy(options.env),
       ...(options.env[AI_STREAM_IDLE_TIMEOUT_SECONDS_ENV]?.trim()
         ? { aiStreamIdleTimeoutMs: resolveAiStreamIdleTimeoutMs(options.env) }

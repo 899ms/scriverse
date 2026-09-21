@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCharacterDetails, buildCharacterSections, buildCharacterState, characterStateEntries, normalizeCharacterDetails, normalizeCharacterSections } from "../../src/public/character-profile.js";
+import { buildCharacterDetails, buildCharacterSections, buildCharacterState, characterStateEntries, normalizeCharacterAttributes, normalizeCharacterDetails, normalizeCharacterSections, normalizeCharacterState } from "../../src/public/character-profile.js";
 
 describe("复杂人物设定结构", () => {
   it("清理扩展属性并保留不同泰坦的异构字段", () => {
@@ -38,5 +38,43 @@ describe("复杂人物设定结构", () => {
       ["地心", "95", "{\"phase\":\"active\"}", "blocked"],
       previous
     )).toEqual({ location: "地心", energy: 95, nested: { phase: "active" } });
+  });
+
+  it("把模型混写的角色属性剪枝为身份与扩展属性", () => {
+    expect(normalizeCharacterAttributes({
+      身份定位: "主角(待正文起笔后随剧情演进)",
+      修为: "故事开局,未踏入修行;修仙路为本书主线成长线",
+      阶层: "水乡船户人家",
+      identity: "",
+      details: [{ label: "身高·", value: "1米1" }]
+    })).toEqual({
+      identity: "主角(待正文起笔后随剧情演进)",
+      details: [
+        { label: "修为", value: "故事开局,未踏入修行;修仙路为本书主线成长线" },
+        { label: "阶层", value: "水乡船户人家" },
+        { label: "身高", value: "1米1" }
+      ]
+    });
+    expect(normalizeCharacterAttributes({ age: 24, species: "人类" })).toEqual({
+      species: "人类",
+      details: [{ label: "age", value: "24" }]
+    });
+    expect(normalizeCharacterAttributes({ identity: "  ", details: [{ label: "", value: "x" }] })).toEqual({});
+    expect(normalizeCharacterAttributes({
+      identity: "北港领航员",
+      身份定位: "另一套定位",
+      species: "人类"
+    })).toEqual({
+      identity: "北港领航员",
+      species: "人类",
+      details: [{ label: "身份定位", value: "另一套定位" }]
+    });
+  });
+
+  it("去掉当前状态中的空值", () => {
+    expect(normalizeCharacterState({ location: "北港", condition: "  ", nested: { phase: "active" } })).toEqual({
+      location: "北港",
+      nested: { phase: "active" }
+    });
   });
 });

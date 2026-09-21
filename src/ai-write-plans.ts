@@ -6,6 +6,10 @@ import { UserAuthService } from "./user-auth.js";
 import { AppError } from "./errors.js";
 import { logger } from "./logger.js";
 import { id as randomId, json, now } from "./utils.js";
+import { characterAttributesInputSchema, characterStateInputSchema } from "./character-structured-fields.js";
+import {
+  DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH
+} from "./chapter-annotation-note.js";
 import {
   canReadWorkModule,
   canWriteWorkModule,
@@ -150,9 +154,9 @@ const characterInputSchema = z.object({
   aliases: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
   raceId: identifierSchema.nullable().optional(),
   organizationIds: z.array(identifierSchema).max(100).optional(),
-  attributes: jsonObjectSchema.optional(),
+  attributes: characterAttributesInputSchema.optional().describe("身份与扩展属性。只使用 identity 字符串和 details[{label,value}]；其他键会在入库时折入 details。"),
   profile: jsonObjectSchema.optional(),
-  currentState: jsonObjectSchema.optional()
+  currentState: characterStateInputSchema.optional()
 }).strict();
 
 /** 种族可写字段：成员归属与分节设定结构保留给人工。 */
@@ -298,7 +302,8 @@ function toolInputJsonSchema(schema: z.ZodType): Record<string, unknown> {
  * 仅属于其他操作的字段错误地暴露给 create_entry。
  */
 export function aiWritePlanOperationToolSchemas(
-  toggles: Readonly<Record<AiWriteToolId, boolean>>
+  toggles: Readonly<Record<AiWriteToolId, boolean>>,
+  chapterAnnotationNoteMaxLength = DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH
 ): Record<string, unknown>[] {
   const entityTypes: AiEntryEntityType[] = [
     ...(toggles.settings ? ["setting" as const] : []),
@@ -352,7 +357,7 @@ export function aiWritePlanOperationToolSchemas(
         kind: { type: "string", enum: ["note", "todo"] },
         startLine: { type: "integer", minimum: 1 },
         endLine: { type: "integer", minimum: 1 },
-        note: { type: "string", minLength: 1, maxLength: 2000 }
+        note: { type: "string", minLength: 1, maxLength: chapterAnnotationNoteMaxLength }
       },
       required: ["opType", "chapterId", "kind", "startLine", "endLine", "note"],
       additionalProperties: false
@@ -411,40 +416,42 @@ export const aiAnalysisTaskTypeLabels: Record<string, string> = {
   "relationship-analysis": "人物关系分析"
 };
 
-const createOperationSchema = z.discriminatedUnion("opType", [
-  z.object({
-    opType: z.literal("create_entry"),
-    entityType: entryEntityTypeSchema,
-    /** 章节大纲按章节定位。 */
-    chapterId: identifierSchema.optional(),
-    input: z.unknown()
-  }).strict(),
-  z.object({
-    opType: z.literal("update_entry"),
-    entityType: entryEntityTypeSchema,
-    entityId: identifierSchema.optional(),
-    chapterId: identifierSchema.optional(),
-    input: z.unknown()
-  }).strict(),
-  z.object({
-    opType: z.literal("create_annotation"),
-    chapterId: identifierSchema,
-    kind: z.enum(["note", "todo"]),
-    startLine: z.number().int().positive(),
-    endLine: z.number().int().positive(),
-    note: z.string().trim().min(1).max(2000)
-  }).strict(),
-  z.object({
-    opType: z.literal("create_task"),
-    taskType: z.enum([...AI_ANALYSIS_TASK_TYPES, "relationship-analysis"]),
-    scope: jsonObjectSchema.optional(),
-    modelId: identifierSchema.optional()
-  }).strict()
-]);
+function createPlanOperationSchema(chapterAnnotationNoteMaxLength: number) {
+  return z.discriminatedUnion("opType", [
+    z.object({
+      opType: z.literal("create_entry"),
+      entityType: entryEntityTypeSchema,
+      /** 章节大纲按章节定位。 */
+      chapterId: identifierSchema.optional(),
+      input: z.unknown()
+    }).strict(),
+    z.object({
+      opType: z.literal("update_entry"),
+      entityType: entryEntityTypeSchema,
+      entityId: identifierSchema.optional(),
+      chapterId: identifierSchema.optional(),
+      input: z.unknown()
+    }).strict(),
+    z.object({
+      opType: z.literal("create_annotation"),
+      chapterId: identifierSchema,
+      kind: z.enum(["note", "todo"]),
+      startLine: z.number().int().positive(),
+      endLine: z.number().int().positive(),
+      note: z.string().trim().min(1).max(chapterAnnotationNoteMaxLength)
+    }).strict(),
+    z.object({
+      opType: z.literal("create_task"),
+      taskType: z.enum([...AI_ANALYSIS_TASK_TYPES, "relationship-analysis"]),
+      scope: jsonObjectSchema.optional(),
+      modelId: identifierSchema.optional()
+    }).strict()
+  ]);
+}
+
+const createOperationSchema = createPlanOperationSchema(DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH);
 
 export type PlanOperationRaw = z.infer<typeof createOperationSchema>;
-
-const planOperationsSchema = z.array(createOperationSchema).min(1);
 
 export const createAiWritePlanInputSchema = z.object({
   aiSummary: z.string().trim().min(1).max(2000),
@@ -992,8 +999,12 @@ export type NormalizedPlanOperation =
   | { opType: "create_annotation"; chapterId: string; kind: "note" | "todo"; startLine: number; endLine: number; note: string }
   | { opType: "create_task"; taskType: string; scope?: Record<string, unknown>; modelId?: string };
 
-export function normalizePlanOperations(rawOperations: unknown, maxOperations: number): NormalizedPlanOperation[] {
-  const rawList = planOperationsSchema.max(maxOperations, `单次计划最多包含 ${maxOperations} 个操作`).safeParse(rawOperations);
+export function normalizePlanOperations(
+  rawOperations: unknown,
+  maxOperations: number,
+  chapterAnnotationNoteMaxLength = DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH
+): NormalizedPlanOperation[] {
+  const rawList = z.array(createPlanOperationSchema(chapterAnnotationNoteMaxLength)).min(1).max(maxOperations, `单次计划最多包含 ${maxOperations} 个操作`).safeParse(rawOperations);
   if (!rawList.success) {
     const firstIssue = rawList.error.issues[0];
     throw new AppError(400, "AI_PLAN_OPERATION_INVALID", `${firstIssue?.path.join(".") || "operation"}：${firstIssue?.message ?? "操作格式无效"}`);
@@ -1313,6 +1324,7 @@ export type AnalysisTaskStarter = (workId: string, input: ResolvedAnalysisTaskIn
 export type AiWritePlanManagerOptions = {
   planTtlMs?: number;
   questionTtlMs?: number;
+  chapterAnnotationNoteMaxLength?: number;
 };
 
 export class AiWritePlanManager {
@@ -1323,6 +1335,7 @@ export class AiWritePlanManager {
   private readonly startAnalysisTask: AnalysisTaskStarter;
   private readonly planTtlMs: number;
   private readonly questionTtlMs: number;
+  readonly chapterAnnotationNoteMaxLength: number;
 
   constructor(
     deps: {
@@ -1341,6 +1354,7 @@ export class AiWritePlanManager {
     this.startAnalysisTask = deps.startAnalysisTask;
     this.planTtlMs = options.planTtlMs ?? AI_WRITE_PLAN_TTL_MS;
     this.questionTtlMs = options.questionTtlMs ?? AI_USER_QUESTION_TTL_MS;
+    this.chapterAnnotationNoteMaxLength = options.chapterAnnotationNoteMaxLength ?? DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH;
     this.recoverStaleExecutingPlans();
   }
 
@@ -1605,7 +1619,7 @@ export class AiWritePlanManager {
     const summaryParse = z.string().trim().min(1).max(2000).safeParse(input.aiSummary);
     if (!summaryParse.success) throw new AppError(400, "AI_PLAN_SUMMARY_REQUIRED", "AI 必须提供一段简要说明");
     const maxOperations = resolveAiWritePlanMaxOperations(process.env.AI_WRITE_PLAN_MAX_OPERATIONS);
-    const operations = normalizePlanOperations(input.operations, maxOperations);
+    const operations = normalizePlanOperations(input.operations, maxOperations, this.chapterAnnotationNoteMaxLength);
 
     const toggles = this.getEnabledTools(workId);
     const effective = this.effectiveWritePermissions(input.initiator, input.conversationOwnerUserId, workId);

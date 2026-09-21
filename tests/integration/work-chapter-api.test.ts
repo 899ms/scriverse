@@ -2,7 +2,7 @@ import request from "supertest";
 import JSZip from "jszip";
 import { buffer } from "node:stream/consumers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Runtime } from "../../src/app.js";
+import { createRuntime, type Runtime } from "../../src/app.js";
 import { chapterAnnotationLineHashes } from "../../src/chapter-annotation-anchor.js";
 import { createTestRuntime } from "../helpers.js";
 
@@ -433,6 +433,78 @@ describe("作品、导入和章节版本 API", () => {
       { version_no: 2, source: "update" },
       { version_no: 3, source: "delete" }
     ]);
+  });
+
+  it("正文评论与待办内容默认最长 6000 个字符", async () => {
+    const work = await request(runtime.app).post("/api/works").send({ title: "评论文本长度作品" }).expect(201);
+    const volume = await request(runtime.app).post(`/api/works/${work.body.data.id}/volumes`).send({ title: "第一卷" }).expect(201);
+    const chapter = await request(runtime.app).post(`/api/works/${work.body.data.id}/chapters`).send({
+      volumeId: volume.body.data.id,
+      title: "第一章",
+      content: "第一行正文"
+    }).expect(201);
+
+    const allowed = "界".repeat(6000);
+    const created = await request(runtime.app).post(`/api/chapters/${chapter.body.data.id}/annotations`).send({
+      kind: "note",
+      startLine: 1,
+      endLine: 1,
+      note: allowed
+    }).expect(201);
+    expect(created.body.data.note).toHaveLength(6000);
+
+    const rejected = await request(runtime.app).post(`/api/chapters/${chapter.body.data.id}/annotations`).send({
+      kind: "todo",
+      startLine: 1,
+      endLine: 1,
+      note: "界".repeat(6001)
+    }).expect(400);
+    expect(rejected.body.error.code).toBe("VALIDATION_ERROR");
+
+    const updated = await request(runtime.app).patch(`/api/chapter-annotations/${created.body.data.id}`).send({
+      note: "待".repeat(6000),
+      expectedVersionNo: created.body.data.versionNo
+    }).expect(200);
+    expect(updated.body.data.note).toHaveLength(6000);
+
+    const updateRejected = await request(runtime.app).patch(`/api/chapter-annotations/${created.body.data.id}`).send({
+      note: "待".repeat(6001),
+      expectedVersionNo: updated.body.data.versionNo
+    }).expect(400);
+    expect(updateRejected.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("运行时选项可将正文评论长度上限设为 2000", async () => {
+    const limited = createRuntime({
+      databasePath: ":memory:",
+      masterSecret: "annotation-note-limit-test-secret-with-enough-length",
+      disableUserAuth: true,
+      chapterAnnotationNoteMaxLength: 2000
+    });
+    try {
+      const work = await request(limited.app).post("/api/works").send({ title: "评论下限作品" }).expect(201);
+      const volume = await request(limited.app).post(`/api/works/${work.body.data.id}/volumes`).send({ title: "第一卷" }).expect(201);
+      const chapter = await request(limited.app).post(`/api/works/${work.body.data.id}/chapters`).send({
+        volumeId: volume.body.data.id,
+        title: "第一章",
+        content: "第一行正文"
+      }).expect(201);
+      await request(limited.app).post(`/api/chapters/${chapter.body.data.id}/annotations`).send({
+        kind: "note",
+        startLine: 1,
+        endLine: 1,
+        note: "界".repeat(2000)
+      }).expect(201);
+      const rejected = await request(limited.app).post(`/api/chapters/${chapter.body.data.id}/annotations`).send({
+        kind: "note",
+        startLine: 1,
+        endLine: 1,
+        note: "界".repeat(2001)
+      }).expect(400);
+      expect(rejected.body.error.code).toBe("VALIDATION_ERROR");
+    } finally {
+      await limited.close();
+    }
   });
 
   it("编辑正文后将评论重新锚定到对应原文行", async () => {

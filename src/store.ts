@@ -38,6 +38,7 @@ import {
 import { buildWritingCalendar, writingDateKey } from "./writing-progress-time.js";
 import { DEFAULT_AGENT_TOOL_CALL_LIMIT, MIN_AGENT_TOOL_CALL_LIMIT, resolveMaxAgentToolCallLimit } from "./ai-tool-results.js";
 import { DEFAULT_AI_STREAM_IDLE_TIMEOUT_SECONDS, normalizeAiStreamIdleTimeoutSeconds } from "./ai-stream-timeout.js";
+import { normalizeCharacterAttributes, normalizeCharacterState } from "./public/character-profile.js";
 import {
   normalizeRoleplayScenePin,
   roleplayUserTurnDisplayText,
@@ -670,6 +671,7 @@ type AiConversationMessageInput = {
     reasoningContent?: string;
     anthropicContent?: unknown[];
     chatImageAttachmentIds?: string[];
+    kind?: "steer";
   };
 };
 
@@ -7070,9 +7072,9 @@ export class Store {
         JSON.stringify(names.aliases),
         species,
         raceId,
-        JSON.stringify(input.attributes ?? {}),
+        JSON.stringify(normalizeCharacterAttributes(input.attributes ?? {})),
         JSON.stringify(input.profile ?? {}),
-        JSON.stringify(input.currentState ?? {}),
+        JSON.stringify(normalizeCharacterState(input.currentState ?? {})),
         input.isDead ? 1 : 0,
         JSON.stringify(input.lockedFields ?? []),
         input.firstChapterId ?? null,
@@ -7938,7 +7940,7 @@ export class Store {
     const before = this.characterSnapshot(current);
     const workId = String(current.workId);
     const names = this.prepareCharacterNames(input.name ?? String(current.name), input.aliases ?? current.aliases as string[]);
-    const attributes = input.attributes ?? current.attributes as Record<string, unknown>;
+    const attributes = normalizeCharacterAttributes(input.attributes ?? current.attributes as Record<string, unknown>);
     const legacySpecies = typeof attributes.species === "string" ? attributes.species.trim() : "";
     let raceId = input.raceId === undefined ? current.raceId as string | null : input.raceId;
     if (input.raceId === undefined && !raceId && input.species !== undefined) {
@@ -7964,7 +7966,7 @@ export class Store {
         raceId,
         JSON.stringify(attributes),
         JSON.stringify(input.profile ?? current.profile),
-        JSON.stringify(input.currentState ?? current.currentState),
+        JSON.stringify(normalizeCharacterState(input.currentState ?? current.currentState)),
         input.isDead === undefined ? (current.isDead ? 1 : 0) : (input.isDead ? 1 : 0),
         JSON.stringify(input.lockedFields ?? current.lockedFields),
         input.firstChapterId === undefined ? (current.firstChapterId as string | null) : input.firstChapterId,
@@ -8089,9 +8091,9 @@ export class Store {
         JSON.stringify(names.aliases),
         species,
         raceId,
-        JSON.stringify(snapshot.attributes ?? {}),
+        JSON.stringify(normalizeCharacterAttributes(snapshot.attributes ?? {})),
         JSON.stringify(snapshot.profile ?? {}),
-        JSON.stringify(snapshot.currentState ?? {}),
+        JSON.stringify(normalizeCharacterState(snapshot.currentState ?? {})),
         snapshot.isDead ? 1 : 0,
         JSON.stringify(snapshot.lockedFields ?? []),
         snapshot.firstChapterId ?? null,
@@ -8206,10 +8208,10 @@ export class Store {
       species,
       organizationIds: organizations.map((organization) => organization.organizationId),
       organizations,
-      attributes: json(requiredString(row, "attributes_json"), {}),
+      attributes: normalizeCharacterAttributes(json(requiredString(row, "attributes_json"), {})),
       profile,
       profileSectionCount,
-      currentState: json(requiredString(row, "current_state_json"), {}),
+      currentState: normalizeCharacterState(json(requiredString(row, "current_state_json"), {})),
       isDead: booleanValue(row, "is_dead"),
       isFavorite: this.mapEntityFavorite(row),
       isPinned: this.mapEntityPin(row),
