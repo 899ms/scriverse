@@ -5967,7 +5967,7 @@ function updateAiMentionMenu() {
     prompt.removeAttribute("aria-activedescendant");
     menu.setAttribute("aria-label", "选择 Chat Slash 操作");
     menu.innerHTML = options.length
-      ? options.map((item, index) => `<button id="ai-skill-option-${index}" class="ai-mention-option ai-skill-option" type="button" role="option" aria-selected="false" tabindex="-1" data-ai-command-name="${esc(item.name)}"${item.kind === "skill" ? ` data-ai-skill-name="${esc(item.name)}"` : ""}><small>${item.kind === "skill" ? "Skill" : "操作"}</small><span><strong>/${esc(item.name)}</strong><em>${esc(item.label)} · ${esc(item.description)}</em></span></button>`).join("")
+      ? options.map((item, index) => `<button id="ai-skill-option-${index}" class="ai-mention-option ai-skill-option" type="button" role="option" aria-selected="false" tabindex="-1" data-ai-command-name="${esc(item.name)}"${item.kind === "skill" ? ` data-ai-skill-name="${esc(item.name)}"` : ""}><small>${item.kind === "skill" ? "Skill" : "压缩"}</small><span><strong>/${esc(item.name)}</strong><em>${esc(item.label)} · ${esc(item.description)}</em></span></button>`).join("")
       : '<p class="ai-mention-empty">没有匹配的 Chat Slash 操作</p>';
     menu.classList.remove("hidden");
     prompt.setAttribute("aria-expanded", "true");

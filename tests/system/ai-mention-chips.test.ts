@@ -40,6 +40,7 @@ describe("AI 输入框引用气泡", () => {
     expect(application.text).toContain('menu.setAttribute("aria-label", "选择 Chat Slash 操作")');
     expect(application.text).toContain('data-ai-skill-name="${esc(item.name)}"');
     expect(application.text).toContain('data-ai-command-name="${esc(item.name)}"');
+    expect(application.text).toContain('${item.kind === "skill" ? "Skill" : "压缩"}');
     expect(application.text).toContain("function selectAiSlashCommand(button)");
     expect(application.text).toContain('void compactAiConversation({ clearComposer: true });');
     expect(application.text).toContain("function selectAiSkill(button)");
