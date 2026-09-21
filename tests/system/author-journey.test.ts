@@ -447,8 +447,12 @@ describe("作者完整创作流程", () => {
     expect(styles.text).toContain(".token-usage-details-table {");
     expect(styles.text).toContain("@container usage-overview (max-width: 760px)");
     expect(page.text).toContain('id="platform-ai-return"');
-    expect(page.text.match(/feature=ai-usage-stat-display-v1/gu)).toHaveLength(3);
-    expect(page.text.match(/feature=ai-usage-year-v1/gu)).toHaveLength(3);
+    const usageAssets = [...page.text.matchAll(/<(?:link|script)\b[^>]*(?:href|src)="\/(?:styles\.css|app\.js)\?[^"\s]*"[^>]*>/gu)];
+    expect(usageAssets).toHaveLength(2);
+    for (const [asset] of usageAssets) {
+      expect(asset).toContain("feature=ai-usage-stat-display-v1");
+      expect(asset).toContain("feature=ai-usage-year-v1");
+    }
     expect(page.text).toContain('id="users-settings-return"');
     expect(page.text).toContain('id="platform-ui-settings-return"');
     expect(page.text).toContain('id="members-settings-return" class="ghost-button settings-parent-button hidden"');
