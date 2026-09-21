@@ -42,6 +42,7 @@ describe("编辑器工具栏布局", () => {
     expect(page.text).toContain('&feature=chapter-word-count-consistency-v1');
     expect(page.text).toMatch(/styles\.css\?[^"\n]*feature=markdown-word-count-five-digit-v2/u);
     expect(page.text).toMatch(/styles\.css\?[^"\n]*feature=annotation-marker-offset-v1/u);
+    expect(page.text).toMatch(/styles\.css\?[^"\n]*feature=annotation-bubble-visibility-v1/u);
     expect(application.text).toContain("async function createSelectedLineAnnotation(");
     expect(application.text).toContain("function chapterAnnotationCard(");
     expect(application.text).toContain("function bindChapterAnnotationCards(");
@@ -68,6 +69,7 @@ describe("编辑器工具栏布局", () => {
     expect(styles.text).toContain(".chapter-comment-module-list");
     expect(styles.text).toContain(".chapter-annotation-source");
     expect(styles.text).toContain(".chapter-line-annotation-count { position: absolute; top: -4px; right: -10px;");
+    expect(styles.text).toContain(".chapter-line-numbers { position: relative; z-index: 2; grid-column: 1; grid-row: 1; min-height: 0; overflow: clip; overflow-clip-margin: 12px;");
     expect(styles.text).toContain(".line-citation-menu-separator { height: 1px; margin: 5px 2px; background: var(--line); }");
     expect(styles.text).toContain("font-family: var(--font-mono), monospace; font-size: 10px; line-height: 1.6");
     expect(page.text).toContain(">编辑</button>");
