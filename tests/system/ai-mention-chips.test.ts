@@ -36,11 +36,14 @@ describe("AI 输入框引用气泡", () => {
     expect(application.text).toContain("volumeTitle: volume.title");
     expect(application.text).toContain("没有匹配的角色、设定、章节或上下文能力");
     expect(application.text).toContain("function moveAiMentionActiveOption(direction)");
-    expect(application.text).toContain('/ai-skill-menu.js?v=20260830-ai-skill-slash-menu-v1');
-    expect(application.text).toContain('menu.setAttribute("aria-label", "选择写作 Skill")');
+    expect(application.text).toContain('/ai-skill-menu.js?v=20260921-ai-compact-slash-command-v2');
+    expect(application.text).toContain('menu.setAttribute("aria-label", "选择 Chat Slash 操作")');
     expect(application.text).toContain('data-ai-skill-name="${esc(item.name)}"');
+    expect(application.text).toContain('data-ai-command-name="${esc(item.name)}"');
+    expect(application.text).toContain("function selectAiSlashCommand(button)");
+    expect(application.text).toContain('void compactAiConversation({ clearComposer: true });');
     expect(application.text).toContain("function selectAiSkill(button)");
-    expect(application.text).toContain("if (activeOption.dataset.aiSkillName) selectAiSkill(activeOption)");
+    expect(application.text).toContain("if (activeOption.dataset.aiCommandName) selectAiSlashCommand(activeOption)");
     expect(application.text).toContain('prompt.setAttribute("aria-activedescendant", activeOption.id);');
     expect(application.text).toContain('option.setAttribute("aria-selected", String(active));');
     expect(application.text).toContain('bindPlainTextPaste($("#ai-prompt"));');
@@ -71,6 +74,8 @@ describe("AI 输入框引用气泡", () => {
     expect(styles.text).not.toContain(".ai-reference-chip");
     expect(skillMenu.text).toContain('name: "continue-writing"');
     expect(skillMenu.text).toContain('name: "polish-writing"');
+    expect(skillMenu.text).toContain('name: "compact"');
+    expect(skillMenu.text).toContain("export function listAiSlashOptions");
     expect(skillMenu.text).toContain("export function findAiSkillCommand");
   });
 });
