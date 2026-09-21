@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error 浏览器端模块没有单独的类型声明，测试仅调用纯函数导出。
-import { applyAiSkillCommand, findAiSkillCommand, listAiSkillOptions } from "../../src/public/ai-skill-menu.js";
+import { applyAiSkillCommand, findAiSkillCommand, listAiSkillOptions, listAiSlashOptions } from "../../src/public/ai-skill-menu.js";
 
 describe("AI 输入框 Skill 候选", () => {
   it("在行首或空白后的斜杠命令处匹配并过滤候选", () => {
@@ -13,6 +13,12 @@ describe("AI 输入框 Skill 候选", () => {
     ]);
     expect(listAiSkillOptions("polish").map((item: { name: string }) => item.name)).toEqual(["polish-writing"]);
     expect(listAiSkillOptions("续写").map((item: { name: string }) => item.name)).toEqual(["continue-writing"]);
+    expect(listAiSlashOptions().map((item: { name: string }) => item.name)).toEqual([
+      "continue-writing",
+      "polish-writing",
+      "compact"
+    ]);
+    expect(listAiSlashOptions("compact").map((item: { name: string }) => item.name)).toEqual(["compact"]);
   });
 
   it("用选中的完整命令替换当前斜杠查询并保留后续文本", () => {
