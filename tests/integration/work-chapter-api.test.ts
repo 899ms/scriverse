@@ -935,6 +935,41 @@ describe("作品、导入和章节版本 API", () => {
     expect(rangeOverflow.body.error.code).toBe("CHAPTER_NUMBER_RANGE");
   });
 
+  it("排序只更新位置变化的章节且每章仅触发一次数据库更新", async () => {
+    const work = runtime.store.createWork({ title: "排序写入范围" });
+    const workId = String(work.id);
+    const source = String(runtime.store.createVolume(workId, { title: "来源卷" }).id);
+    const target = String(runtime.store.createVolume(workId, { title: "目标卷" }).id);
+    const chapters = runtime.database.transaction(() => Array.from({ length: 120 }, (_, index) => runtime.store.createChapter(workId, {
+      volumeId: index < 60 ? source : target,
+      title: `章节 ${index}`,
+      content: "正文保持不变"
+    })));
+    runtime.database.raw.exec(`CREATE TEMP TABLE chapter_move_writes (chapter_id TEXT NOT NULL);
+      CREATE TEMP TRIGGER track_chapter_move_writes AFTER UPDATE ON chapters BEGIN
+        INSERT INTO chapter_move_writes VALUES (new.id);
+      END;`);
+    const movedId = String(chapters[1]!.id);
+    await request(runtime.app).post(`/api/chapters/${movedId}/move`)
+      .send({ volumeId: source, sortOrder: 0, expectedVersionNo: 1 }).expect(200);
+    expect(runtime.database.all("SELECT chapter_id FROM chapter_move_writes").map(row => row.chapter_id).sort())
+      .toEqual([chapters[0]!.id, movedId].sort());
+    expect(runtime.store.getChapter(String(chapters[2]!.id))).toEqual(chapters[2]);
+
+    const moved = await request(runtime.app).post(`/api/chapters/${movedId}/move`)
+      .send({ volumeId: target, sortOrder: 60, expectedVersionNo: 2 }).expect(200);
+    expect(moved.body.data).toMatchObject({ volumeId: target, sortOrder: 60, versionNo: 3, content: "正文保持不变" });
+    const writes = runtime.database.all("SELECT chapter_id FROM chapter_move_writes").slice(2).map(row => row.chapter_id);
+    expect(writes).toHaveLength(60);
+    expect(new Set(writes).size).toBe(60);
+    expect(runtime.store.getChapter(String(chapters[60]!.id))).toEqual(chapters[60]);
+    await request(runtime.app).post(`/api/chapters/${movedId}/move`)
+      .send({ volumeId: target, sortOrder: 0, expectedVersionNo: 1 }).expect(409);
+    expect(runtime.database.all("SELECT chapter_id FROM chapter_move_writes")).toHaveLength(62);
+    expect(runtime.database.get("PRAGMA integrity_check")).toEqual({ integrity_check: "ok" });
+    expect(runtime.database.all("PRAGMA foreign_key_check")).toEqual([]);
+  });
+
   it("规范化同卷排序并支持章节跨卷移动", async () => {
     const work = await request(runtime.app).post("/api/works").send({ title: "章节排序作品" }).expect(201);
     const firstVolume = await request(runtime.app).post(`/api/works/${work.body.data.id}/volumes`).send({ title: "第一卷" }).expect(201);

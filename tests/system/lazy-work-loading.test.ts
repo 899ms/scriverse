@@ -7,7 +7,7 @@ describe("作品工作台按需加载", () => {
     const application = await readFile(join(process.cwd(), "src/public/app.js"), "utf8");
     const selectWorkSource = application.slice(
       application.indexOf("async function selectWork(workId, preferredChapterId = null)"),
-      application.indexOf("function renderTree()")
+      application.indexOf("async function loadVolumeChapters(")
     );
 
     expect(selectWorkSource).toContain("renderTree();");
@@ -25,7 +25,7 @@ describe("作品工作台按需加载", () => {
   it("作品树先显示折叠分卷，展开后才渲染章节节点", async () => {
     const application = await readFile(join(process.cwd(), "src/public/app.js"), "utf8");
     const renderTreeSource = application.slice(
-      application.indexOf("function renderTree()"),
+      application.indexOf("function renderTree("),
       application.indexOf("function renderChapterBatchDialog()")
     );
 
@@ -121,7 +121,7 @@ describe("作品工作台按需加载", () => {
     expect(application).toContain("mergeChapterDirectoryEntry(state.chapter);");
     expect(application).toContain('const selectionRequestId = ++chapterSelectionRequestId;');
     expect(application).toContain('if (selectionGeneration !== chapterSelectionRequestGeneration || selectionRequestId !== chapterSelectionRequestId || state.work?.id !== workId) return false;');
-    expect(application).toContain('await loadChapterForeshadowReminders();');
+    expect(application).toContain('void loadChapterForeshadowReminders();');
     expect(application).toContain('await renderTasks(taskListPage, { refresh: true });');
     expect(application).toContain("invalidateModuleRequestsAfterMutation(path, method);");
   });
