@@ -3878,25 +3878,30 @@ export class Store {
       this.assertExpectedRevision("chapter", chapterId, expectedVersionNo, "章节", Number(lockedChapter.versionNo));
       const sourceVolumeId = String(lockedChapter.volumeId);
       const targetVolumeId = input.volumeId;
-      const sourceChapterIds = this.db.all(
-        "SELECT id FROM chapters WHERE volume_id = ? AND deleted_at IS NULL ORDER BY sort_order, created_at, id",
+      const sourceChapters = this.db.all(
+        "SELECT id, sort_order FROM chapters WHERE volume_id = ? AND deleted_at IS NULL ORDER BY sort_order, created_at, id",
         sourceVolumeId
-      ).map((row) => requiredString(row, "id")).filter((idValue) => idValue !== chapterId);
+      );
+      const sourceChapterIds = sourceChapters.map((row) => requiredString(row, "id")).filter((idValue) => idValue !== chapterId);
+      const targetChapters = sourceVolumeId === targetVolumeId
+        ? sourceChapters
+        : this.db.all(
+          "SELECT id, sort_order FROM chapters WHERE volume_id = ? AND deleted_at IS NULL ORDER BY sort_order, created_at, id",
+          targetVolumeId
+        );
+      const previousSortOrders = new Map([...sourceChapters, ...targetChapters].map((row) => [requiredString(row, "id"), numberValue(row, "sort_order")]));
       const targetChapterIds = sourceVolumeId === targetVolumeId
         ? sourceChapterIds
-        : this.db.all(
-          "SELECT id FROM chapters WHERE volume_id = ? AND deleted_at IS NULL ORDER BY sort_order, created_at, id",
-          targetVolumeId
-        ).map((row) => requiredString(row, "id")).filter((idValue) => idValue !== chapterId);
+        : targetChapters.map((row) => requiredString(row, "id")).filter((idValue) => idValue !== chapterId);
       const targetIndex = Math.min(input.sortOrder, targetChapterIds.length);
       targetChapterIds.splice(targetIndex, 0, chapterId);
       const timestamp = now();
-      sourceChapterIds.forEach((idValue, sortOrder) => {
+      const updateSortOrder = (idValue: string, sortOrder: number) => {
+        if (idValue === chapterId || previousSortOrders.get(idValue) === sortOrder) return;
         this.db.run("UPDATE chapters SET sort_order = ?, updated_at = ? WHERE id = ?", sortOrder, timestamp, idValue);
-      });
-      targetChapterIds.forEach((idValue, sortOrder) => {
-        this.db.run("UPDATE chapters SET volume_id = ?, sort_order = ?, updated_at = ? WHERE id = ?", targetVolumeId, sortOrder, timestamp, idValue);
-      });
+      };
+      if (sourceVolumeId !== targetVolumeId) sourceChapterIds.forEach(updateSortOrder);
+      targetChapterIds.forEach(updateSortOrder);
       const versionNo = Number(lockedChapter.versionNo) + 1;
       this.db.run(
         `UPDATE analysis_tasks SET status = 'expired', updated_at = ?
@@ -3909,7 +3914,9 @@ export class Store {
         targetVolumeId
       );
       this.db.run(
-        "UPDATE chapters SET version_no = ?, analysis_status = 'expired', updated_at = ? WHERE id = ?",
+        "UPDATE chapters SET volume_id = ?, sort_order = ?, version_no = ?, analysis_status = 'expired', updated_at = ? WHERE id = ?",
+        targetVolumeId,
+        targetIndex,
         versionNo,
         timestamp,
         chapterId
