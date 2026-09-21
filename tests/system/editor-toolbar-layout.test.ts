@@ -119,7 +119,8 @@ describe("编辑器工具栏布局", () => {
     expect(page.text).not.toContain('id="new-chapter-button"');
     expect(application.text).toContain('data-new-chapter-volume');
     expect(application.text).toContain('async function openChapterDialog(volumeId = null)');
-    expect(application.text).toContain('draggable="${proseEditable ? "true" : "false"}"');
+    expect(application.text).toContain('draggable="false" title="点击打开章节');
+    expect(application.text).toContain('class="chapter-drag-handle" draggable="true"');
     expect(application.text).toContain("async function moveChapterInTree(");
     expect(application.text).toContain("async function moveChapterByKeyboard(");
     expect(application.text).toContain('event.altKey');

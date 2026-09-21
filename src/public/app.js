@@ -1,3 +1,4 @@
+import { applyChapterDirectoryMove, chapterDirectoryEntry } from "/chapter-directory.js?v=20260921-directory-performance-v1";
 import { buildRelationshipGraph, createGalaxyRenderer, normalizeGalaxyFrameRate, normalizeGalaxyMotionMode, renderRelationshipMindMap } from "/relationship-graph.js?v=20260817-relationship-canvas-scale-v1&feature=galaxy-motion-mode-v3&feature=galaxy-edge-label-threshold-v1";
 import { formatDateTime, normalizeParagraphSpacing } from "/text-formatting.js?v=20260713-saved-at-seconds";
 import { countProseWords } from "/text-count.js?v=20260906-chapter-word-count-consistency-v1";
@@ -9462,7 +9463,7 @@ async function loadVolumeChapters(volumeId) {
   const workId = state.work.id;
   const generation = workScopedUiGeneration;
   volumeChapterLoadingIds.add(volumeId);
-  renderTree();
+  renderTree([volumeId]);
   const request = (async () => {
     try {
       const chapters = await apiAllPages(`/api/volumes/${encodeURIComponent(volumeId)}/chapters`, 100);
@@ -9472,17 +9473,15 @@ async function loadVolumeChapters(volumeId) {
       volume.chapters = chapters;
       volume.chapterCount = chapters.length;
       loadedVolumeChapterIds.add(volumeId);
-      renderTree();
     } catch (error) {
       if (state.work?.id === workId && generation === workScopedUiGeneration) {
         toast(`加载分卷章节失败：${error.message}`, "error");
-        renderTree();
       }
     } finally {
       if (volumeChapterRequests.get(volumeId) === request) {
         volumeChapterLoadingIds.delete(volumeId);
         volumeChapterRequests.delete(volumeId);
-        if (state.work?.id === workId && generation === workScopedUiGeneration) renderTree();
+        if (state.work?.id === workId && generation === workScopedUiGeneration) renderTree([volumeId]);
       }
     }
   })();
@@ -9506,20 +9505,7 @@ function mergeChapterDirectoryEntry(chapter) {
   if (!state.work || !chapter?.volumeId) return;
   const volume = state.work.volumes.find((item) => item.id === chapter.volumeId);
   if (!volume) return;
-  const directoryEntry = {
-    id: chapter.id,
-    workId: chapter.workId,
-    volumeId: chapter.volumeId,
-    title: chapter.title,
-    chapterType: chapter.chapterType,
-    sortOrder: chapter.sortOrder,
-    wordCount: chapter.wordCount,
-    versionNo: chapter.versionNo,
-    analysisStatus: chapter.analysisStatus,
-    excludedFromAnalysis: chapter.excludedFromAnalysis,
-    createdAt: chapter.createdAt,
-    updatedAt: chapter.updatedAt
-  };
+  const directoryEntry = chapterDirectoryEntry(chapter);
   const chapters = Array.isArray(volume.chapters) ? volume.chapters : [];
   const existingIndex = chapters.findIndex((item) => item.id === chapter.id);
   if (existingIndex >= 0) chapters[existingIndex] = directoryEntry;
@@ -9529,14 +9515,61 @@ function mergeChapterDirectoryEntry(chapter) {
   volume.chapterCount = Math.max(Number(volume.chapterCount ?? 0), chapters.length);
 }
 
-function renderTree() {
+function syncChapterTreeSelection() {
+  const tree = $("#novel-tree");
+  tree.querySelectorAll(".chapter-node.active").forEach((node) => node.classList.remove("active"));
+  const chapter = state.chapter;
+  if (!chapter) return;
+  let button = tree.querySelector(`[data-chapter-id="${CSS.escape(chapter.id)}"]`);
+  if (!button || button.closest(".volume-node")?.classList.contains("is-collapsed")) {
+    renderTree([chapter.volumeId]);
+    button = tree.querySelector(`[data-chapter-id="${CSS.escape(chapter.id)}"]`);
+  }
+  if (!button) return;
+  button.classList.add("active");
+  button.firstElementChild.textContent = chapter.title;
+  button.querySelector("small").textContent = Number(chapter.wordCount ?? 0).toLocaleString("zh-CN");
+  const badge = button.querySelector(".chapter-type-badge")?.textContent ?? "";
+  const chapterType = chapter.chapterType && chapter.chapterType !== "正文" ? chapter.chapterType : "";
+  if (badge !== chapterType) {
+    button.querySelector(".chapter-node-meta").innerHTML = `${chapterType ? `<em class="chapter-type-badge">${esc(chapterType)}</em>` : ""}<small>${Number(chapter.wordCount ?? 0).toLocaleString("zh-CN")}</small>`;
+  }
+}
+
+function syncMovedChapterTree(chapterId, volumeIds) {
+  const tree = $("#novel-tree");
+  const location = findChapterLocation(chapterId);
+  const button = tree.querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`);
+  const target = location && tree.querySelector(`[data-volume-id="${CSS.escape(location.volume.id)}"] .volume-chapters`);
+  if (!button || !target) return renderTree(volumeIds);
+  if (state.collapsedVolumeIds.has(location.volume.id)) button.remove();
+  else {
+    target.querySelector(".entity-history-empty")?.remove();
+    const nextChapter = location.volume.chapters[location.chapterIndex + 1];
+    const nextButton = nextChapter ? target.querySelector(`[data-chapter-id="${CSS.escape(nextChapter.id)}"]`) : null;
+    target.insertBefore(button, nextButton);
+  }
+  for (const volumeId of volumeIds) {
+    const volume = state.work.volumes.find((item) => item.id === volumeId);
+    const node = tree.querySelector(`[data-volume-id="${CSS.escape(volumeId)}"]`);
+    if (!volume || !node) continue;
+    node.querySelector(".volume-chapter-count-number").textContent = String(volume.chapterCount);
+    if (!volume.chapters.length && !state.collapsedVolumeIds.has(volumeId)) {
+      node.querySelector(".volume-chapters").innerHTML = '<p class="entity-history-empty">本卷还没有章节。</p>';
+    }
+  }
+}
+
+function renderTree(volumeIds = null) {
   if (!state.work) return;
   const count = state.work.volumes.reduce((total, volume) => total + Number(volume.chapterCount ?? volume.chapters?.length ?? 0), 0);
   const proseEditable = canEditProse();
   $("#chapter-count").querySelector(".chapter-count-number").textContent = String(count);
   $("#reader-open-button").disabled = !canReadModule("editor") || count === 0;
   $("#novel-tree").classList.remove("empty-copy");
-  $("#novel-tree").innerHTML = state.work.volumes.map((volume) => {
+  const tree = $("#novel-tree");
+  const volumes = volumeIds ? state.work.volumes.filter((volume) => volumeIds.includes(volume.id)) : state.work.volumes;
+  const markup = volumes.map((volume) => {
     const collapsed = state.collapsedVolumeIds.has(volume.id);
     const chapters = Array.isArray(volume.chapters) ? volume.chapters : [];
     const chapterContent = collapsed
@@ -9547,8 +9580,9 @@ function renderTree() {
           ? '<p class="entity-history-empty">展开后加载章节。</p>'
           : chapters.length
             ? chapters.map((chapter) => `
-        <button class="chapter-node ${state.chapter?.id === chapter.id ? "active" : ""}" type="button" data-chapter-id="${esc(chapter.id)}" draggable="${proseEditable ? "true" : "false"}" title="${proseEditable ? "拖拽排序；Alt+方向键排序，Alt+Shift+方向键跨卷" : ""}">
+        <button class="chapter-node ${state.chapter?.id === chapter.id ? "active" : ""}" type="button" data-chapter-id="${esc(chapter.id)}" draggable="false" title="点击打开章节${proseEditable ? "；拖动左侧手柄排序；Alt+方向键排序，Alt+Shift+方向键跨卷" : ""}">
           <span>${esc(chapter.title)}</span><span class="chapter-node-meta">${chapter.chapterType && chapter.chapterType !== "正文" ? `<em class="chapter-type-badge">${esc(chapter.chapterType)}</em>` : ""}<small>${Number(chapter.wordCount ?? 0).toLocaleString("zh-CN")}</small></span>
+          ${proseEditable ? '<span class="chapter-drag-handle" draggable="true" aria-hidden="true" title="拖动排序"><svg viewBox="0 0 12 18" focusable="false"><path d="M4 4h.01M8 4h.01M4 9h.01M8 9h.01M4 14h.01M8 14h.01"></path></svg></span>' : ""}
         </button>`).join("")
             : '<p class="entity-history-empty">本卷还没有章节。</p>';
     return `
@@ -9562,15 +9596,28 @@ function renderTree() {
       ${chapterContent}
       </div>
     </div>`;
-  }).join("");
-  $("#novel-tree").querySelectorAll("[data-volume-toggle]").forEach((button) => {
+  });
+  const roots = [];
+  if (volumeIds) {
+    volumes.forEach((volume, index) => {
+      const node = tree.querySelector(`[data-volume-id="${CSS.escape(volume.id)}"]`);
+      if (!node) return;
+      node.outerHTML = markup[index];
+      roots.push(tree.querySelector(`[data-volume-id="${CSS.escape(volume.id)}"]`));
+    });
+  } else {
+    tree.innerHTML = markup.join("");
+    roots.push(tree);
+  }
+  const renderedNodes = (selector) => roots.flatMap((root) => Array.from(root.querySelectorAll(selector)));
+  renderedNodes("[data-volume-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
       const volumeId = button.dataset.volumeToggle;
       if (state.collapsedVolumeIds.has(volumeId)) {
         state.collapsedVolumeIds.delete(volumeId);
         void loadVolumeChapters(volumeId);
       } else state.collapsedVolumeIds.add(volumeId);
-      renderTree();
+      renderTree([volumeId]);
     });
     button.addEventListener("contextmenu", (event) => {
       if (!canEditProse()) return;
@@ -9598,18 +9645,19 @@ function renderTree() {
       });
     }
   });
-  $("#novel-tree").querySelectorAll("[data-volume-detail]").forEach((button) => {
+  renderedNodes("[data-volume-detail]").forEach((button) => {
     button.addEventListener("click", () => {
       openVolumeDialog(state.work.volumes.find((volume) => volume.id === button.dataset.volumeDetail));
     });
   });
-  $("#novel-tree").querySelectorAll("[data-new-chapter-volume]").forEach((button) => {
+  renderedNodes("[data-new-chapter-volume]").forEach((button) => {
     button.addEventListener("click", () => openChapterDialog(button.dataset.newChapterVolume));
   });
-  $("#novel-tree").querySelectorAll("[data-chapter-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
+  renderedNodes("[data-chapter-id]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      if (event.target.closest(".chapter-drag-handle")) return;
       const chapterId = button.dataset.chapterId;
-      await selectChapter(chapterId);
+      if (!(await selectChapter(chapterId))) return;
       $("#novel-tree").querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`)?.focus();
       if (isMobileViewport()) {
         panelLayout.leftCollapsed = true;
@@ -9630,6 +9678,10 @@ function renderTree() {
     });
     if (proseEditable) {
       button.addEventListener("dragstart", (event) => {
+        if (!canEditProse() || !event.target.closest(".chapter-drag-handle")) {
+          event.preventDefault();
+          return;
+        }
         event.dataTransfer?.setData("text/plain", button.dataset.chapterId);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
         button.classList.add("is-dragging");
@@ -9652,7 +9704,7 @@ function renderTree() {
         const target = findChapterLocation(button.dataset.chapterId);
         const after = button.classList.contains("drop-after");
         button.classList.remove("is-drag-over", "drop-after");
-        if (!chapterId || !target) return;
+        if (!chapterId || !target || chapterId === button.dataset.chapterId) return;
         const targetChapters = target.volume.chapters.filter((chapter) => chapter.id !== chapterId);
         const targetIndex = targetChapters.findIndex((chapter) => chapter.id === button.dataset.chapterId);
         await moveChapterInTree(chapterId, target.volume.id, Math.max(0, targetIndex + (after ? 1 : 0)));
@@ -9805,22 +9857,36 @@ function findChapterLocation(chapterId) {
 
 async function moveChapterInTree(chapterId, volumeId, sortOrder) {
   const location = findChapterLocation(chapterId);
-  if (!location || chapterMovePending) return;
+  if (!location || chapterMovePending || !canEditProse()) return;
   const samePosition = location.volume.id === volumeId && location.chapterIndex === sortOrder;
   if (samePosition) return;
+  const workId = state.work.id;
+  const generation = workScopedUiGeneration;
+  const volumeIds = [...new Set([location.volume.id, volumeId])];
   chapterMovePending = true;
   try {
+    await Promise.all(volumeIds.map((id) => loadVolumeChapters(id)));
+    if (state.work?.id !== workId || generation !== workScopedUiGeneration) return;
+    if (volumeIds.some((id) => !loadedVolumeChapterIds.has(id))) return;
     const moved = await api(`/api/chapters/${encodeURIComponent(chapterId)}/move`, {
       method: "POST",
       body: { volumeId, sortOrder, expectedVersionNo: location.chapter.versionNo }
     });
-    state.work = await api(`/api/works/${encodeURIComponent(state.work.id)}`);
-    if (state.chapter?.id === chapterId) state.chapter = { ...state.chapter, ...moved };
-    renderTree();
-    $("#novel-tree").querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`)?.focus();
+    if (state.work?.id !== workId || generation !== workScopedUiGeneration) return;
+    const affectedVolumeIds = applyChapterDirectoryMove(state.work, moved);
+    const selectedEntry = state.chapter && findChapterLocation(state.chapter.id)?.chapter;
+    if (selectedEntry) {
+      state.chapter = { ...state.chapter, ...selectedEntry };
+      updateChapterPath();
+      updateChapterStats();
+    }
+    syncMovedChapterTree(chapterId, affectedVolumeIds);
+    const focusTarget = $("#novel-tree").querySelector(`[data-chapter-id="${CSS.escape(chapterId)}"]`)
+      ?? $("#novel-tree").querySelector(`[data-volume-toggle="${CSS.escape(volumeId)}"]`);
+    focusTarget?.focus();
     toast(location.volume.id === volumeId ? "章节顺序已更新" : "章节已移动到目标分卷");
   } catch (error) {
-    toast(error.message, "error");
+    if (state.work?.id === workId && generation === workScopedUiGeneration) toast(error.message, "error");
   } finally {
     chapterMovePending = false;
   }
@@ -9832,7 +9898,7 @@ async function moveChapterByKeyboard(chapterId, direction, crossVolume) {
   if (crossVolume) {
     const targetVolume = state.work.volumes[location.volumeIndex + direction];
     if (!targetVolume) return toast("已经是最前或最后一个分卷");
-    await moveChapterInTree(chapterId, targetVolume.id, direction < 0 ? targetVolume.chapters.length : 0);
+    await moveChapterInTree(chapterId, targetVolume.id, direction < 0 ? Number(targetVolume.chapterCount ?? targetVolume.chapters.length) : 0);
     return;
   }
   const targetIndex = location.chapterIndex + direction;
@@ -10147,10 +10213,7 @@ async function selectChapter(chapterId, { editMode = false } = {}) {
   $("#welcome-view").classList.add("hidden");
   $("#module-view").classList.add("hidden");
   $("#editor-view").classList.remove("hidden");
-  const volume = state.work.volumes.find((item) => item.id === state.chapter.volumeId);
-  const chapterPath = `${volume?.title ?? "正文"} / 保存于 ${formatDateTime(state.chapter.updatedAt)}`;
-  $("#chapter-path").textContent = chapterPath;
-  $("#chapter-path").title = chapterPath;
+  updateChapterPath();
   $("#chapter-title").value = state.chapter.title;
   $("#chapter-content").value = state.chapter.content;
   resetChapterDraftLineIds(state.chapter);
@@ -10165,10 +10228,18 @@ async function selectChapter(chapterId, { editMode = false } = {}) {
   if (!canEditProse()) setSaveState("正文只读");
   else if (chapterEditorReadOnly) setSaveState("阅读模式");
   else setSaveState("已保存");
-  renderTree();
+  syncChapterTreeSelection();
   replacePageRoute({ view: "editor", workId: state.work.id, chapterId: state.chapter.id });
-  await loadChapterForeshadowReminders();
+  void loadChapterForeshadowReminders();
   return true;
+}
+
+function updateChapterPath() {
+  if (!state.work || !state.chapter) return;
+  const volume = state.work.volumes.find((item) => item.id === state.chapter.volumeId);
+  const chapterPath = `${volume?.title ?? "正文"} / 保存于 ${formatDateTime(state.chapter.updatedAt)}`;
+  $("#chapter-path").textContent = chapterPath;
+  $("#chapter-path").title = chapterPath;
 }
 
 function updateChapterStats() {
