@@ -7,6 +7,11 @@ const MOBILE_SESSION_KEY = "scriverse.mobile.session.v1";
 const MOBILE_PROFILE_KEY = "scriverse.mobile.profile.v1";
 const SYNC_PROTOCOL = { min: 1, max: 1 };
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const MOBILE_LAUNCHER_URL = "https://localhost/?scriverseMobileLauncher=1&changeServer=1";
+
+function isNativeMobileShell() {
+  try { return globalThis.Capacitor?.isNativePlatform?.() === true; } catch { return false; }
+}
 
 function storageValue(storage, key) {
   try { return storage?.getItem(key) ?? null; } catch { return null; }
@@ -255,6 +260,11 @@ export class MobileOfflineRuntime {
     return result;
   }
 
+  openServerSelector() {
+    if (!isNativeMobileShell() || !this.location?.assign) return;
+    this.location.assign(MOBILE_LAUNCHER_URL);
+  }
+
   async aggregateStatus() {
     await this.ensureClient();
     if (!this.store) return { works: 0, pendingMutations: 0, conflicts: 0, rejected: 0 };
@@ -302,6 +312,17 @@ export class MobileOfflineRuntime {
     const install = () => {
       const host = document.querySelector(".top-actions");
       if (!host || document.querySelector("#mobile-offline-button")) return;
+      if (isNativeMobileShell()) {
+        const serverButton = document.createElement("button");
+        serverButton.id = "mobile-server-button";
+        serverButton.className = "topbar-icon-button mobile-server-button";
+        serverButton.type = "button";
+        serverButton.textContent = "Server";
+        serverButton.setAttribute("aria-label", "切换 Server");
+        serverButton.title = "切换 Server";
+        serverButton.addEventListener("click", () => this.openServerSelector());
+        host.insertBefore(serverButton, host.querySelector("#theme-toggle") ?? null);
+      }
       const button = document.createElement("button");
       button.id = "mobile-offline-button";
       button.className = "topbar-icon-button mobile-offline-button";
