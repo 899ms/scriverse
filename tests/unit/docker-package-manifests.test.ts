@@ -18,7 +18,7 @@ describe("Docker 依赖清单规范化", () => {
     };
 
     expect(lock.packages["node_modules/@img/sharp-wasm32"]?.dependencies).toHaveProperty("@emnapi/runtime");
-    expect(lock.packages["node_modules/@emnapi/runtime"]?.version).toBe("1.11.2");
+    expect(lock.packages["node_modules/@emnapi/runtime"]?.version).toBe("1.11.3");
     expect(lock.packages["node_modules/@emnapi/core"]?.version).toBe("1.11.2");
   });
 
