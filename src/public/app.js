@@ -5008,6 +5008,16 @@ function applyAiConversationTitle(title, conversationId = state.aiConversationId
   renderAiChatTabs();
 }
 
+function refreshAiConversationTitleAfterGeneration(conversationId, workId) {
+  void api(`/api/ai-conversations/${encodeURIComponent(conversationId)}/title`)
+    .then((conversation) => {
+      if (String(state.work?.id ?? "") !== workId) return;
+      upsertAiConversationSummary(conversation);
+      applyAiConversationTitle(conversation.title, conversationId);
+    })
+    .catch(() => undefined);
+}
+
 function applyAiConversations(pageResult) {
   state.aiConversations = pageResult.items;
   aiConversationHistoryPage = {
@@ -19256,6 +19266,12 @@ async function sendAiWithOptions({ ignoreContextWarning = false, retry = null } 
     assistantMetadata = streamed.metadata;
     persistedStreamMessage = streamed.messageId ? { id: streamed.messageId, createdAt: streamed.createdAt } : null;
     applyAiConversationTitle(streamed.conversationTitle, streamedRequest.conversationId);
+    if (streamed.conversationTitleGenerationStarted) {
+      refreshAiConversationTitleAfterGeneration(
+        streamedRequest.conversationId,
+        String(state.work?.id ?? "")
+      );
+    }
     try {
       const request = assertAiRequestCurrent(requestHolder.snapshot);
       if (persistedStreamMessage) {
@@ -19480,6 +19496,7 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
   let persistedMessageId = null;
   let persistedMessageCreatedAt = null;
   let conversationTitle = null;
+  let conversationTitleGenerationStarted = false;
   let question = null;
   let persistedUserMessage = null;
   let contextAction = "ready";
@@ -19718,6 +19735,7 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
         persistedMessageId = typeof payload.messageId === "string" ? payload.messageId : null;
         persistedMessageCreatedAt = typeof payload.messageCreatedAt === "string" ? payload.messageCreatedAt : null;
         conversationTitle = typeof payload.conversationTitle === "string" ? payload.conversationTitle : null;
+        conversationTitleGenerationStarted = payload.conversationTitleGenerationStarted === true;
         const announcedCompaction = contextAction === "compacted" || streamContextCompacted;
         setAiChatTabContextUsage(tab, attachAiContextCacheHitPercent(payload.contextUsage, payload.cacheHitPercent), announcedCompaction);
         await Promise.all([typewriter.finish(), finishProcessStepTypewriters()]);
@@ -19755,7 +19773,7 @@ async function streamChat(requestHolder, body, idempotencyKey, { endpoint = null
     if (streamError) throw streamError;
     assertAiStreamCompleted(streamCompleted);
     if (warningOnly && messageMounted) message.remove();
-    return { action: warningOnly ? "warn" : contextAction, content: streamedText, message, metadata: generatedMetadata, messageId: persistedMessageId, createdAt: persistedMessageCreatedAt, conversationTitle, userMessage: persistedUserMessage, question };
+    return { action: warningOnly ? "warn" : contextAction, content: streamedText, message, metadata: generatedMetadata, messageId: persistedMessageId, createdAt: persistedMessageCreatedAt, conversationTitle, conversationTitleGenerationStarted, userMessage: persistedUserMessage, question };
   } catch (error) {
     const streamFailure = error instanceof Error ? error : new Error(String(error ?? "AI 流式调用失败"));
     const interruptionCode = typeof streamFailure.code === "string" ? streamFailure.code.slice(0, 100) : "AI_STREAM_FAILED";

@@ -3750,6 +3750,19 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     const permissions = requestPermissions(request, String(conversation.workId));
     data(response, redactAiConversation(conversation, permissions));
   });
+  app.get("/api/ai-conversations/:conversationId/title", async (request, response) => {
+    const conversationId = request.params.conversationId;
+    const current = store.getAiConversationSummary(conversationId);
+    requestPermissions(request, String(current.workId));
+    await ai.waitForConversationTitle(conversationId);
+    const updated = store.getAiConversationSummary(conversationId);
+    requestPermissions(request, String(updated.workId));
+    data(response, {
+      id: updated.id,
+      title: updated.title,
+      updatedAt: updated.updatedAt
+    });
+  });
   app.get("/api/ai-conversations/:conversationId/export", (request, response) => {
     const conversation = store.getAiConversation(request.params.conversationId);
     const permissions = requestPermissions(request, String(conversation.workId));
@@ -4524,6 +4537,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
         contextUsage: result.contextUsage,
         conversationId,
         conversationTitle: result.conversationTitle,
+        conversationTitleGenerationStarted: result.conversationTitleGenerationStarted,
         messageId: typeof result.conversationMessage === "object" && result.conversationMessage !== null
           ? (result.conversationMessage as Record<string, unknown>).id
           : undefined,

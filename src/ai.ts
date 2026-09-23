@@ -3315,6 +3315,7 @@ export class AiManager {
   private readonly retryPolicy: AiRetryPolicy;
   private readonly retrySleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
   private readonly liteLlmPriceCache?: LiteLlmPriceCache;
+  private readonly conversationTitleGenerations = new Map<string, Promise<string | null>>();
   private readonly taskControllers = new Map<string, AbortController>();
   private readonly autoRunStarting = new Map<string, Set<string>>();
   private readonly autoRunTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -6367,14 +6368,14 @@ export class AiManager {
     const titleSettings = this.store.getWorkAiSettings(input.workId);
     const titleModelId = typeof titleSettings.titleGenerationModelId === "string" ? titleSettings.titleGenerationModelId : "";
     const defaultTitle = firstUserContent ? defaultAiConversationTitle(firstUserContent) : "";
-    const isCompletingSecondAssistantTurn = conversationBefore?.messages.at(-1)?.role === "user"
-      && userMessages.length === 2
-      && assistantMessages.length === 1;
+    const isCompletingFirstAssistantTurn = conversationBefore?.messages.at(-1)?.role === "user"
+      && userMessages.length === 1
+      && assistantMessages.length === 0;
     const shouldGenerateTitle = Boolean(
       input.conversationId
       && firstUserContent
       && titleModelId
-      && isCompletingSecondAssistantTurn
+      && isCompletingFirstAssistantTurn
       && (conversationBefore?.title === "新对话" || conversationBefore?.title === defaultTitle)
     );
     const processStartedAt = process.hrtime.bigint();
@@ -6522,8 +6523,10 @@ export class AiManager {
         });
       }
     }
+    let conversationTitleGenerationStarted = false;
     if (shouldGenerateTitle && conversationMessage && input.conversationId) {
-      void this.generateConversationTitle(
+      conversationTitleGenerationStarted = true;
+      const generation = this.generateConversationTitle(
         input.workId,
         input.conversationId,
         titleModelId,
@@ -6534,8 +6537,18 @@ export class AiManager {
         defaultTitle
       ).catch((error) => {
         logger.warn("ai.conversation_title.failed", { workId: input.workId, conversationId: input.conversationId, error: aiErrorForLog(error) });
+        return null;
+      });
+      this.conversationTitleGenerations.set(input.conversationId, generation);
+      void generation.then(() => {
+        if (this.conversationTitleGenerations.get(input.conversationId!) === generation) {
+          this.conversationTitleGenerations.delete(input.conversationId!);
+        }
       });
     }
+    const updatedConversation = input.conversationId
+      ? this.store.getAiConversationSummary(input.conversationId)
+      : null;
     return {
       callId: generated.callId,
       content: generated.content,
@@ -6547,9 +6560,15 @@ export class AiManager {
       toolCalls: generated.toolCalls,
       processSteps: generated.processSteps,
       contextUsage: generated.contextUsage,
+      conversationTitle: updatedConversation?.title ?? "新对话",
+      conversationTitleGenerationStarted,
       roleplayMemoriesCommitted: committedRoleplayMemories,
       ...(conversationMessage ? { conversationMessage } : {})
     };
+  }
+
+  async waitForConversationTitle(conversationId: string): Promise<void> {
+    await this.conversationTitleGenerations.get(conversationId);
   }
 
   async resumeUserQuestion(input: {
