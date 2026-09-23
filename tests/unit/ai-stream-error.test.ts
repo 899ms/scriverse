@@ -49,7 +49,7 @@ describe("publicAiStreamError", () => {
   });
 
   it("向客户端公开叙界平台响应保护来源", () => {
-    expect(publicAiStreamError(new AppError(502, "AI_RESPONSE_TOO_LARGE", "AI 供应商响应超过 20971520 字节上限", {
+    expect(publicAiStreamError(new AppError(502, "AI_RESPONSE_TOO_LARGE", "AI 供应商响应超过 64 字节上限", {
       failureOrigin: "platform",
       callId: "call_limit",
       providerName: "demo",
@@ -57,7 +57,7 @@ describe("publicAiStreamError", () => {
       modelId: "gpt-test"
     }))).toEqual({
       code: "AI_RESPONSE_TOO_LARGE",
-      message: "AI 供应商响应超过 20971520 字节上限",
+      message: "AI 供应商响应超过 64 字节上限",
       status: 502,
       failureOrigin: "platform",
       callId: "call_limit",

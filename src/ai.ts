@@ -72,6 +72,7 @@ import { DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS, normalizeAiStreamIdleTimeoutSeconds 
 import { CredentialVault } from "./credential-vault.js";
 import { AttachmentStorage } from "./attachment-storage.js";
 import { DEFAULT_AI_CHAT_IMAGE_MAX_BYTES, formatUploadLimit } from "./upload-limits.js";
+import { isAiResponseByteLimitExceeded, resolveAiResponseMaxBytes } from "./ai-response-limit.js";
 import {
   characterExtractionHash,
   characterExtractionSelectionFingerprint,
@@ -367,18 +368,21 @@ function completionSkillsTokens(messages: CompletionMessage[]): number {
 // A small but non-transparent 128x128 PNG. The model test must exercise an actual image_url
 // payload, while keeping the request cheap and avoiding any user data in the probe.
 const MULTIMODAL_TEST_IMAGE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAACXBIWXMAAAPoAAAD6AG1e1JrAAACfklEQVR4nO2cwY3EQBACJ8LOglRJyw4DJOpR/xOUuF17Zp91H9xsBi/9B8AhABIcC4AEx78AJDg+AyDB8SEQCY5vAUhwfA1EguM5ABIcD4KQ4HgSiATHo2AkON4FIMHxMggJjreBSHC8DkaC4zwAEhwHQpDgOBGEBMeRMCQ4zgQiwXEoFAmOU8FIcBwLR4LjXgASHBdDkOC4GYQEx9UwJDjuBiLBcTkUCY7bwUhwXA8319P5fQCPS8APRChfAgIUBOFRWADlS0CAgiA8CgugfAkIUBCER2EBlC8BAQqC8CgsgPIlIEBBEB6FBVC+BAQoCMKjsADKl4AABUF4FBZA+RIQoCAIj8ICKF8CAhQE4VFYAOVLQICCIDwKC6B8CQhQEIRHYQGULwEBCoLwKCyA8iUgQEEQHoUFUL4EBCgIwqOwAMqXgAAFQXgUFkD5EhCgIAiPwgIoXwICFAThUVgA5UtAgIIgPAoLoHwJCFAQhEdhAZQvAQEKgvAoLIDyJSBAQRAehQVQvgQEKAjCo7AAypeAAAVBeBQWQPkSEKAgCI/CAihfAgIUBOFRWADlS0CAgiA8CgugfAkIUBCER2EBlC8BAQqC8CgsgPIlIEBBEB6FBVC+BAQoCMKjsADKl4AABUF4FBZA+RIQoCAIj8ICKF8CAhQE4VFYAOVLQICCIDwKC6B8CQhQEIRHYQGULwEBCoLwKCyA8iUgQEEQHoUFUL4EBCgIwqOwAMqXgAAFQXgUFkD5EhCgIAiPwgIoXwICFAThUVgA5UtAgIIgPAoLoHwJCFAQhEdhAZQvAQEKgvAoLIDyJSBAQRAehQVQvgQEKAjCo7AAypeAAAVBeJQfFY4JQ620WGEAAAAASUVORK5CYII=";
-/** 出站 AI 响应体上限，防止恶意或故障供应商推送超大响应拖垮进程。 */
-export const AI_RESPONSE_MAX_BYTES = 20 * 1024 * 1024;
-
 export async function readResponseTextLimited(
   response: Response,
-  maximumBytes = AI_RESPONSE_MAX_BYTES
+  maximumBytes: number | null = resolveAiResponseMaxBytes()
 ): Promise<string> {
   const declared = response.headers.get("content-length");
-  if (declared && /^\d+$/u.test(declared) && Number(declared) > maximumBytes) {
+  if (maximumBytes !== null && declared && /^\d+$/u.test(declared) && Number(declared) > maximumBytes) {
     throw new AppError(502, "AI_RESPONSE_TOO_LARGE", `AI 供应商响应超过 ${maximumBytes} 字节上限`);
   }
-  if (!response.body) return response.text();
+  if (!response.body) {
+    const text = await response.text();
+    if (isAiResponseByteLimitExceeded(Buffer.byteLength(text, "utf8"), maximumBytes)) {
+      throw new AppError(502, "AI_RESPONSE_TOO_LARGE", `AI 供应商响应超过 ${maximumBytes} 字节上限`);
+    }
+    return text;
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -387,7 +391,7 @@ export async function readResponseTextLimited(
     if (done) break;
     if (!value?.byteLength) continue;
     total += value.byteLength;
-    if (total > maximumBytes) {
+    if (isAiResponseByteLimitExceeded(total, maximumBytes)) {
       await reader.cancel().catch(() => undefined);
       throw new AppError(502, "AI_RESPONSE_TOO_LARGE", `AI 供应商响应超过 ${maximumBytes} 字节上限`);
     }
@@ -681,7 +685,6 @@ type DesktopLocalAiRunRecord = {
 
 const DESKTOP_LOCAL_AI_RUN_LIMIT = 20;
 const DESKTOP_LOCAL_AI_RUN_RETENTION_MS = 10 * 60_000;
-const DESKTOP_LOCAL_AI_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 
 export type AiContextCompactionEvent = {
   contextUsage: Record<string, unknown>;
@@ -7318,8 +7321,10 @@ export class AiManager {
     if (pending.request.requestId !== input.requestId) {
       throw new AppError(409, "DESKTOP_LOCAL_AI_REQUEST_MISMATCH", "Desktop 本地 AI 响应与当前请求不匹配");
     }
-    if (Buffer.byteLength(input.body, "utf8") > DESKTOP_LOCAL_AI_RESPONSE_MAX_BYTES) {
-      throw new AppError(413, "DESKTOP_LOCAL_AI_RESPONSE_TOO_LARGE", "Desktop 本地 AI 响应过大");
+    const maximumResponseBytes = resolveAiResponseMaxBytes();
+    const responseBytes = Buffer.byteLength(input.body, "utf8");
+    if (isAiResponseByteLimitExceeded(responseBytes, maximumResponseBytes)) {
+      throw new AppError(413, "DESKTOP_LOCAL_AI_RESPONSE_TOO_LARGE", `Desktop 本地 AI 响应超过 ${maximumResponseBytes} 字节上限`);
     }
     run.pending = null;
     run.status = "running";
@@ -11569,6 +11574,7 @@ export class AiManager {
         onThinkingDelta(finalReasoning);
       }
     };
+    const maximumResponseBytes = resolveAiResponseMaxBytes();
     let receivedBytes = 0;
     let readerEnded = false;
     try {
@@ -11582,9 +11588,9 @@ export class AiManager {
         }
         if (chunk.value?.byteLength) {
           receivedBytes += chunk.value.byteLength;
-          if (receivedBytes > AI_RESPONSE_MAX_BYTES) {
+          if (isAiResponseByteLimitExceeded(receivedBytes, maximumResponseBytes)) {
             await reader.cancel().catch(() => undefined);
-            throw new AppError(502, "AI_RESPONSE_TOO_LARGE", `AI 供应商响应超过 ${AI_RESPONSE_MAX_BYTES} 字节上限`);
+            throw new AppError(502, "AI_RESPONSE_TOO_LARGE", `AI 供应商响应超过 ${maximumResponseBytes} 字节上限`);
           }
         }
         buffer += decoder.decode(chunk.value, { stream: !chunk.done });
