@@ -145,6 +145,7 @@ import {
 } from "/outline-board.js?v=20260813-outline-board-page-v1";
 import { backgroundTaskActivityCount, backgroundTaskPollDelay, collectBackgroundTaskTransitions, filterBackgroundTaskTransitionsForAnnouncement } from "/background-task-center.js?v=20260817-analysis-task-expired-toast-v1";
 import { createModuleRequestCache } from "/module-request-cache.js?v=20260730-module-request-cache-v1";
+import { mobileOfflineRuntime } from "/mobile-app-runtime.js?v=20260923-mobile-app-runtime-v6";
 import { systemStatusPresentation } from "/system-status.js?v=20260801-system-health-v1";
 import { collectS3BackupRunTransitions, s3BackupEncryptionKeyFile, s3BackupEncryptionPresentation, s3BackupFailureToast, s3BackupRootPrefix, s3BackupStatusLabel } from "/s3-backup-ui.js?v=20260810-backup-encryption-v1";
 import { createPresenceClientId, stagePresenceClientIdForRelogin } from "/presence-client-id.js?v=20260810-presence-relogin-v1";
@@ -6520,6 +6521,7 @@ function attachOptimisticVersion(path, method, body) {
 async function api(path, options = {}) {
   const method = String(options.method ?? "GET").toUpperCase();
   const body = options.skipOptimisticVersion ? options.body : attachOptimisticVersion(path, method, options.body);
+  if (mobileOfflineRuntime.offline) return mobileOfflineRuntime.request(path, { method, body });
   const headers = { ...(options.headers ?? {}) };
   if (state.csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) headers["X-CSRF-Token"] = state.csrfToken;
   if (!(body instanceof FormData)) headers["Content-Type"] = "application/json";
@@ -6531,11 +6533,19 @@ async function api(path, options = {}) {
       body: body && typeof body !== "string" ? JSON.stringify(body) : body
     });
   } catch (error) {
+    if (mobileOfflineRuntime.enabled) {
+      const offlineSession = await mobileOfflineRuntime.activateOffline();
+      if (offlineSession) return mobileOfflineRuntime.request(path, { method, body });
+    }
     if (!isAiRequestCancellation(error)) updateSystemHealth({ status: "offline" });
     throw error;
   }
   updateSystemHealth({ status: response.status >= 500 ? "degraded" : "ready" });
   if (!response.ok) {
+    if (response.status === 401 && mobileOfflineRuntime.enabled && !path.startsWith("/api/auth/")) {
+      const offlineSession = await mobileOfflineRuntime.activateOffline();
+      if (offlineSession) return mobileOfflineRuntime.request(path, { method, body });
+    }
     const payload = await response.json().catch(() => ({ error: { message: `请求失败：${response.status}` } }));
     // Presence is best-effort; a heartbeat 401 must not force the login wall.
     if (response.status === 401 && !path.startsWith("/api/auth/") && !path.includes("/presence")) {
@@ -7056,6 +7066,7 @@ function showAuth(setupRequired, registrationOpen = false, setupTokenRequired = 
 function applyAuthenticatedUser(session) {
   state.user = session.user;
   state.csrfToken = session.csrfToken;
+  mobileOfflineRuntime.setSession(session);
   state.registrationMode = session.registrationMode === "invite" || session.registrationMode === "open"
     ? session.registrationMode
     : "disabled";
@@ -7135,9 +7146,16 @@ async function loadPlatformUiSettings() {
 
 async function initializeAuthentication() {
   const route = parsePageRoute(window.location.hash);
-  const response = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error("无法读取登录状态");
-  const session = (await response.json()).data;
+  let session;
+  try {
+    const response = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error("无法读取登录状态");
+    session = (await response.json()).data;
+  } catch (error) {
+    const offlineSession = await mobileOfflineRuntime.getOfflineSession();
+    if (!offlineSession) throw error;
+    session = offlineSession;
+  }
   if (!session.authenticated) {
     // 未登录时一律转到登录页路由；登录页本身则保持原样
     if (route.view !== "login") window.history.replaceState(null, "", serializePageRoute({ view: "login" }));
