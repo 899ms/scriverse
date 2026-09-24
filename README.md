@@ -117,6 +117,7 @@ CLI 会按服务器保存登录凭据。所有连接服务的数据命令都可�
 | `SCRIVERSE_AI_RETRY_COUNT` | `3` | AI 上游返回除 `403`、`429`、`502` 外的 HTTP 错误时的重试次数；有效整数按 `1`–`20` 钳制 |
 | `SCRIVERSE_AI_BACKOFF_RETRY_COUNT` | `10` | AI 上游返回 `429` 或 `502` 时的退避重试次数；有效整数按 `1`–`20` 钳制 |
 | `SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS` | `30` | 交互式 AI 流等待首个或下一个有效事件的最长空闲秒数；有效整数按 `10`–`120` 钳制，非法值回退为 `30` |
+| `SCRIVERSE_AI_RESPONSE_MAX_BYTES` | `0`（默认不限） | AI 供应商和 Desktop 本地 AI 响应的字节上限；正安全整数启用，未设置、`0` 或非法值表示不限 |
 | `APP_AI_CHAT_TAB_LIMIT` | `5` | 浏览器中可同时打开的 Agent 对话数；有效整数按 `1`–`20` 钳制，设为 `1` 时关闭多会话切换和工作台 |
 | `SCRIVERSE_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH` | `6000` | 正文评论和待办内容的最大字符数；有效整数按 `2000`–`20000` 钳制，低于 `2000` 按 `2000` 处理，非法值回退为 `6000` |
 | `APP_AUTH_USERNAME` | 空 | 可选的部署网关账号；应用内用户系统始终启用 |
@@ -137,6 +138,8 @@ CLI 会按服务器保存登录凭据。所有连接服务的数据命令都可�
 `APP_ALLOW_PRIVATE_AI_ENDPOINTS` 会关闭 AI 供应商地址的 SSRF 校验，只应在可信部署必须经透明代理或 fake-ip 访问供应商时显式开启。未设置时生产环境继续校验并拦截本机、内网、链路本地和保留网段；开启后这些地址不再导致连接测试失败，服务启动时会写入警告日志。远程 MCP 服务地址仍保持独立的 SSRF 校验。
 
 `SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS` 在服务启动时读取，只控制交互式 AI 流连续没有新事件的等待时间。每收到一个有效流事件都会重新计时，持续生成超过 60 秒不会因此中断；该配置不设置总时长上限，也不改变分析任务等其他 AI 请求的超时策略。修改后需重启服务生效。
+
+`SCRIVERSE_AI_RESPONSE_MAX_BYTES` 控制 AI 供应商流式响应、普通响应和 Desktop 本地 AI 响应的字节上限。默认关闭上限；未设置、设为 `0` 或非法值时不限，设为正安全整数后按该字节数限制。修改后需重启服务生效。
 
 `SCRIVERSE_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH` 在服务启动时读取，同时约束 API、界面输入和 AI 写计划中的正文评论与待办。修改后需重启服务生效。
 

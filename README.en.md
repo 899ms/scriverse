@@ -109,6 +109,7 @@ Run `scriverse --help` for all local server, default server, authentication, wor
 | `SCRIVERSE_AI_RETRY_COUNT` | `3` | Retry count for AI upstream HTTP errors other than `403`, `429`, and `502`; valid integers are clamped to `1`–`20` |
 | `SCRIVERSE_AI_BACKOFF_RETRY_COUNT` | `10` | Backoff retry count when an AI upstream returns `429` or `502`; valid integers are clamped to `1`–`20` |
 | `SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS` | `30` | Maximum idle time while an interactive AI stream waits for its first or next valid event; valid integers are clamped to `10`–`120`, and invalid values fall back to `30` |
+| `SCRIVERSE_AI_RESPONSE_MAX_BYTES` | `0` (unlimited) | Byte limit for AI provider and Desktop local AI responses; a positive safe integer enables the limit, while unset, `0`, and invalid values mean unlimited |
 | `SCRIVERSE_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH` | `6000` | Maximum character length for chapter comments and todos; valid integers are clamped to `2000`–`20000`, values below `2000` are treated as `2000`, and invalid values fall back to `6000` |
 | `APP_AUTH_USERNAME` | Empty | Optional deployment gateway username; the in-app user system is always enabled |
 | `APP_AUTH_PASSWORD` | Empty | Optional deployment gateway password, at least 12 characters; must be transported over HTTPS |
@@ -120,6 +121,8 @@ Run `scriverse --help` for all local server, default server, authentication, wor
 `APP_ALLOW_PRIVATE_AI_ENDPOINTS` disables AI provider URL SSRF validation and should be enabled only for a trusted deployment that must reach a provider through a transparent proxy or fake-IP mapping. Unset production deployments keep validating and blocking loopback, private-network, link-local, and reserved ranges; when enabled, those addresses no longer fail provider connection tests and startup writes a warning log. Remote MCP server URLs retain independent SSRF validation.
 
 `SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS` is read when the service starts and only controls how long an interactive AI stream may remain without a new event. Every valid stream event restarts the timer, so generation may continue beyond 60 seconds; this setting does not impose a total-duration limit or change timeout behavior for analysis tasks and other AI requests. Restart the service after changing it.
+
+`SCRIVERSE_AI_RESPONSE_MAX_BYTES` controls the byte limit for streamed and regular AI provider responses, as well as Desktop local AI responses. The limit is disabled by default; unset, `0`, and invalid values mean unlimited. Set a positive safe integer to enable a byte limit. Restart the service after changing it.
 
 `SCRIVERSE_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH` is read when the service starts and applies to API validation, the comment input, and AI write plans. Restart the service after changing it.
 

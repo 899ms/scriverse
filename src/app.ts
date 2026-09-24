@@ -15,6 +15,7 @@ import { AI_PROVIDER_PROTOCOL_OPTIONS, AI_PROVIDER_PROTOCOLS, AI_THINKING_TYPES,
 import { MAX_AI_ANALYSIS_TIMEOUT_SECONDS, MIN_AI_ANALYSIS_TIMEOUT_SECONDS } from "./ai-analysis-timeout.js";
 import { aiConversationExportContentDisposition, exportAiConversationMarkdown } from "./ai-conversation-export.js";
 import { DEFAULT_AI_CHAT_TAB_LIMIT } from "./ai-chat-tab-limit.js";
+import { resolveAiResponseMaxBytes } from "./ai-response-limit.js";
 import { DEFAULT_CHAPTER_ANNOTATION_NOTE_MAX_LENGTH } from "./chapter-annotation-note.js";
 import type { AiRetryPolicy } from "./ai-retry.js";
 import {
@@ -871,7 +872,7 @@ const desktopLocalAiRunSchema = z.object({
 const desktopLocalAiCompletionResponseSchema = z.object({
   requestId: identifier,
   status: z.number().int().min(100).max(599),
-  body: z.string().max(4 * 1024 * 1024),
+  body: z.string(),
   retryAfter: z.string().max(500).optional()
 }).strict();
 
@@ -1758,6 +1759,14 @@ export function createRuntime(options: RuntimeOptions): Runtime {
   app.use(createApiRateLimitMiddleware(options.security?.apiRateLimit, options.security?.apiRateWindowMs));
   if (options.security?.enforceSameOrigin ?? true) app.use(createSameOriginMiddleware());
   app.use("/api/sync/works", express.json({ limit: "3mb" }));
+  app.use("/api/works/:workId/desktop-local-ai/runs/:runId/responses", (request, response, next) => {
+    const maximumResponseBytes = resolveAiResponseMaxBytes();
+    // 外层 JSON 会转义响应文本；最终仍按响应字符串的 UTF-8 字节数校验。
+    const requestBodyLimit = maximumResponseBytes === null
+      ? Number.MAX_SAFE_INTEGER
+      : Math.min(Number.MAX_SAFE_INTEGER, maximumResponseBytes * 6 + 4_096);
+    express.json({ limit: requestBodyLimit })(request, response, next);
+  });
   app.use(express.json({ limit: "2mb" }));
 
   const registrationMode = resolveRegistrationMode(options.security);

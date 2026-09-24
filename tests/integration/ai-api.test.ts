@@ -1,7 +1,8 @@
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Runtime } from "../../src/app.js";
-import { AI_RESPONSE_MAX_BYTES, estimateAiTokens } from "../../src/ai.js";
+import { estimateAiTokens } from "../../src/ai.js";
+import { AI_RESPONSE_MAX_BYTES_ENV } from "../../src/ai-response-limit.js";
 import { resolveServerTimeZone } from "../../src/writing-progress-time.js";
 import { createTestRuntime, createWork } from "../helpers.js";
 
@@ -51,6 +52,7 @@ describe("AI 供应商、模型与建议 API", () => {
   afterEach(async () => {
     vi.useRealTimers();
     await runtime.close();
+    vi.unstubAllEnvs();
   });
 
   async function configureAi(): Promise<{ providerId: string; modelId: string }> {
@@ -138,6 +140,63 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(completion.body).toHaveProperty(expectedBodyField);
     if (protocol === "openai-responses") expect(completion.body).not.toHaveProperty("messages");
     if (protocol === "anthropic-messages") expect(completion.body).toHaveProperty("system");
+    await request(runtime.app).delete(`/api/works/${workId}/desktop-local-ai/runs/${runId}`).expect(200);
+  });
+
+  it("Desktop 本地 AI 响应默认不受 4 MiB 字节上限约束", async () => {
+    vi.stubEnv(AI_RESPONSE_MAX_BYTES_ENV, "");
+    const started = await request(runtime.app).post(`/api/works/${workId}/desktop-local-ai/runs`).send({
+      taskType: "continue",
+      instruction: "继续这一章",
+      scope: { type: "chapter", chapterId },
+      runtimeModel: {
+        id: "desktop-unbounded-model",
+        providerId: "desktop-unbounded-provider",
+        providerName: "local/test",
+        protocol: "openai-chat-completions",
+        maxTokensParameter: "max_tokens",
+        thinkingType: "enabled",
+        concurrencyLimit: 3,
+        rpmLimit: 30,
+        analysisTimeoutSeconds: 300,
+        displayName: "本地测试模型",
+        modelId: "local-model",
+        purposes: ["chat", "continue", "polish"],
+        contextNote: "",
+        contextWindow: 128_000,
+        outputNote: "",
+        preset: { temperature: 0.4, max_tokens: 4_096 },
+        thinkingEnabled: false,
+        thinkingEffort: "default",
+        multimodalEnabled: false,
+        note: ""
+      }
+    }).expect(202);
+    const runId = String(started.body.data.id);
+    let pending: Record<string, unknown> | null = null;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const polled = await request(runtime.app).get(`/api/works/${workId}/desktop-local-ai/runs/${runId}`).expect(200);
+      if (polled.body.data.status === "awaiting-completion") {
+        pending = polled.body.data as Record<string, unknown>;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    expect(pending).not.toBeNull();
+    const completion = pending?.completion as { requestId: string };
+    vi.stubEnv(AI_RESPONSE_MAX_BYTES_ENV, "64");
+    const limited = await request(runtime.app)
+      .post(`/api/works/${workId}/desktop-local-ai/runs/${runId}/responses`)
+      .send({ requestId: completion.requestId, status: 200, body: "x".repeat(65) })
+      .expect(413);
+    expect(limited.body.error).toMatchObject({ code: "DESKTOP_LOCAL_AI_RESPONSE_TOO_LARGE" });
+
+    vi.stubEnv(AI_RESPONSE_MAX_BYTES_ENV, "");
+    const responseBody = `${JSON.stringify({ choices: [{ message: { content: "本地响应已接收" } }] })}${" ".repeat(4 * 1024 * 1024)}`;
+    await request(runtime.app)
+      .post(`/api/works/${workId}/desktop-local-ai/runs/${runId}/responses`)
+      .send({ requestId: completion.requestId, status: 200, body: responseBody })
+      .expect(200);
     await request(runtime.app).delete(`/api/works/${workId}/desktop-local-ai/runs/${runId}`).expect(200);
   });
 
@@ -1114,11 +1173,12 @@ describe("AI 供应商、模型与建议 API", () => {
     });
   });
 
-  it("连接测试拒绝成功状态下的超大模型列表响应", async () => {
+  it("连接测试按环境变量拒绝超限的模型列表响应", async () => {
+    vi.stubEnv(AI_RESPONSE_MAX_BYTES_ENV, "64");
     const { providerId } = await configureAi();
     fetchMock.mockImplementation(async () => new Response("{}", {
       status: 200,
-      headers: { "Content-Length": String(AI_RESPONSE_MAX_BYTES + 1) }
+      headers: { "Content-Length": "65" }
     }));
 
     const tested = await request(runtime.app).post(`/api/providers/${providerId}/test`).send({}).expect(200);
@@ -4435,24 +4495,26 @@ describe("AI 供应商、模型与建议 API", () => {
     expect(calls.body.data[0].failure).toContain("上游参数无效：Bearer sk-s*****lue");
   });
 
-  it("侧栏问答将叙界响应大小保护标记为平台错误", async () => {
+  it("AI 上游流按环境变量限制响应字节数并标记为平台错误", async () => {
+    vi.stubEnv(AI_RESPONSE_MAX_BYTES_ENV, "64");
     const { providerId, modelId } = await configureAi();
     await request(runtime.app).post(`/api/providers/${providerId}/test`).send({}).expect(200);
     fetchMock.mockImplementation(async (input) => {
       if (String(input).endsWith("/models")) {
         return new Response(JSON.stringify({ data: [{ id: "mock-novel-model" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
-      return new Response("{}", {
+      const streamBody = `: ${"x".repeat(65)}\n\n`;
+      return new Response(streamBody, {
         status: 200,
         headers: {
-          "Content-Type": "application/json",
-          "Content-Length": String(AI_RESPONSE_MAX_BYTES + 1)
+          "Content-Type": "text/event-stream",
+          "Content-Length": String(Buffer.byteLength(streamBody, "utf8"))
         }
       });
     });
 
     const streamed = await request(runtime.app).post(`/api/works/${workId}/chat/stream`).send({
-      instruction: "触发平台响应大小保护",
+      instruction: "触发可配置的响应字节上限",
       scope: { type: "chapter", chapterId },
       modelId
     }).expect(200).expect("Content-Type", /text\/event-stream/u);
