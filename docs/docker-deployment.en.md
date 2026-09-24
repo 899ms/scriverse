@@ -39,6 +39,7 @@ services:
       SCRIVERSE_AI_RETRY_COUNT: "${SCRIVERSE_AI_RETRY_COUNT:-3}"
       SCRIVERSE_AI_BACKOFF_RETRY_COUNT: "${SCRIVERSE_AI_BACKOFF_RETRY_COUNT:-10}"
       SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS: "${SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS:-30}"
+      SCRIVERSE_AI_RESPONSE_MAX_BYTES: "${SCRIVERSE_AI_RESPONSE_MAX_BYTES:-0}"
       SCRIVERSE_PRE_MIGRATION_BACKUP_RETENTION: "${SCRIVERSE_PRE_MIGRATION_BACKUP_RETENTION:-5}"
       SCRIVERSE_STARTUP_RETRY_LIMIT: "${SCRIVERSE_STARTUP_RETRY_LIMIT:-2}"
     volumes:
@@ -59,6 +60,7 @@ APP_TRUST_PROXY=false
 SCRIVERSE_AI_RETRY_COUNT=3
 SCRIVERSE_AI_BACKOFF_RETRY_COUNT=10
 SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS=30
+SCRIVERSE_AI_RESPONSE_MAX_BYTES=0
 SCRIVERSE_PRE_MIGRATION_BACKUP_RETENTION=5
 SCRIVERSE_STARTUP_RETRY_LIMIT=2
 ```
@@ -102,6 +104,8 @@ docker compose up -d --force-recreate
 `SCRIVERSE_AI_RETRY_COUNT` controls retries for AI upstream HTTP errors other than `403`, `429`, and `502`, defaulting to 3. `SCRIVERSE_AI_BACKOFF_RETRY_COUNT` controls exponential-backoff retries for `429` and `502`, defaulting to 10. Valid integers for both are clamped to 1–20 and invalid values fall back to their defaults; `403` is never retried. Backoff starts at 500 milliseconds and is capped at 5 seconds, including numeric `Retry-After` values. Recreate the container after changing either setting.
 
 `SCRIVERSE_AI_STREAM_IDLE_TIMEOUT_SECONDS` controls how long an interactive AI stream waits for its first or next valid event. It defaults to 30 seconds; valid integers are clamped to 10–120 seconds and invalid values fall back to 30. Each valid event restarts the timer, so this is not a total-duration limit and does not change timeout behavior for analysis tasks or other AI requests. Recreate the container after changing it.
+
+`SCRIVERSE_AI_RESPONSE_MAX_BYTES` controls the byte limit for streamed and regular AI provider responses, as well as Desktop local AI responses. The limit is disabled by default; unset, `0`, and invalid values mean unlimited. Set a positive safe integer to enable a byte limit. Recreate the container after changing it.
 
 ## Container runtime hardening
 
